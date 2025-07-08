@@ -22,12 +22,20 @@ foreach ($changedFiles as $file) {
     $ast = $parser->parse($code);
 
     $traverser = new NodeTraverser();
-    $traverser->addVisitor(new class extends NodeVisitorAbstract {
+    $traverser->addVisitor(new class($fileWarnings) extends NodeVisitorAbstract {
+        private $fileWarnings;
+
+        public function __construct($fileWarnings) {
+            $this->fileWarnings = $fileWarnings;
+        }
+
         public function enterNode(Node $node) {
             if ($node instanceof Node\Expr\FuncCall &&
                 $node->name instanceof Node\Name &&
                 $node->name->toString() === 'var_dump') {
-                $fileWarnings[] = "Warning !: 'var_dump' found on line " . $node->getLine() . "\n";
+                
+                $line = $node->getLine();
+                $this->fileWarnings[] = "Warning: 'var_dump()' found on line {$line}";
             }
         }
     });
