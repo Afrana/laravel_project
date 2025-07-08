@@ -1,4 +1,5 @@
 <?php
+shell_exec("python3 fetch_pr_diff.py");
 
 require 'vendor/autoload.php';
 
