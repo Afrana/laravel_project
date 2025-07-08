@@ -23,11 +23,6 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --optimize-autoloader
 
-      - name: Hotfix missing config (for laravel-multi-menu)
-        run: |
-          mkdir -p vendor/itstructure/laravel-multi-menu/config
-          cp config/multimenu.php vendor/itstructure/laravel-multi-menu/config/multimenu.php
-
       - name: Laravel package discovery
         run: php artisan package:discover
 
