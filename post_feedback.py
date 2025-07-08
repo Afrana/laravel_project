@@ -73,11 +73,12 @@ for line in lines:
             continue
 
         # Post inline review comment
-        pr.create_review_comment(
-            body="⚠️ Avoid using `var_dump()` in committed code.",
-            commit_id=pr.head.sha,
-            path=current_file,
-            position=position
+        repo.create_pull_request_review_comment(
+            pr_number,
+            "⚠️ Avoid using `var_dump()` in committed code.",
+            pr.head.sha,
+            current_file,
+            position
         )
         print(f"Comment posted on {current_file} line {line_no} at diff position {position}")
 
