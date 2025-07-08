@@ -57,7 +57,6 @@ class UpdatePageRequest extends FormRequest
             'icon' => 'nullable|string',
 
         ], $multilingualRules);
-        var_dump($fieldValue);
     }
 
     /**
@@ -83,5 +82,6 @@ class UpdatePageRequest extends FormRequest
             'icon' => __('messages.icon'),
 
         ], $multilingualAttributes);
+        var_dump($this->shortLanguageList);
     }
 }

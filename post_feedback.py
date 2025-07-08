@@ -11,10 +11,6 @@ repo = g.get_repo(repo_name)
 pr = repo.get_pull(pr_number)
 
 def find_position_in_diff(patch, target_line):
-    """
-    Find the position in the diff (1-based) that corresponds to the
-    target_line number in the file.
-    """
     diff_lines = patch.split('\n')
     position = 0
     current_file_line = None
@@ -49,12 +45,12 @@ current_file = None
 review_comments = []
 
 for line in lines:
-    file_match = re.match(r'`File: (.*)`', line)
+    file_match = re.match(r'File: (.*)', line)
     if file_match:
         current_file = file_match.group(1)
         continue
 
-    warn_match = re.match(r"Warning: 'var_dump\(\)' found on `line no (\d+)`", line)
+    warn_match = re.match(r"line no (\d+)", line)
     if current_file and warn_match:
         line_no = int(warn_match.group(1))
 
@@ -72,7 +68,7 @@ for line in lines:
         review_comments.append({
             'path': current_file,
             'position': position,
-            'body': "⚠️ Avoid using `var_dump()` in committed code."
+            'body': "Better to remove `var_dump()`"
         })
 
 if review_comments:

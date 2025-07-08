@@ -57,7 +57,6 @@ class StorePageRequest extends FormRequest
             'icon' => 'nullable|string',
 
         ], $multilingualRules);
-        var_dump($fieldValue);
     }
 
     /**
@@ -83,6 +82,5 @@ class StorePageRequest extends FormRequest
             'icon' => __('messages.icon'),
 
         ], $multilingualAttributes);
-        var_dump($multilingualAttributes);
     }
 }
