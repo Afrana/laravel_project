@@ -8,41 +8,33 @@ use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitorAbstract;
 use PhpParser\Node;
 
+// $changedFiles = explode("\n", trim(shell_exec("git diff --name-only origin/main")));
+
 $parser = (new ParserFactory)->create(ParserFactory::PREFER_PHP7);
 $changedFiles = file('changed_files.txt', FILE_IGNORE_NEW_LINES);
-
-$feedback = [];
 
 foreach ($changedFiles as $file) {
     if (!str_ends_with($file, '.php')) continue;
 
-    $feedback[] = "Reviewing file: $file";
-
+    $review[] = "Reviewing file: $file\n";
     $code = file_get_contents($file);
     $ast = $parser->parse($code);
 
     $traverser = new NodeTraverser();
-    $traverser->addVisitor(new class($file, $feedback) extends NodeVisitorAbstract {
-        private $file;
-        private $feedback;
-
-        public function __construct($file, $feedback) {
-            $this->file = $file;
-            $this->feedback = $feedback;
-        }
-
+    $traverser->addVisitor(new class extends NodeVisitorAbstract {
         public function enterNode(Node $node) {
             if ($node instanceof Node\Expr\FuncCall &&
                 $node->name instanceof Node\Name &&
                 $node->name->toString() === 'var_dump') {
-                $line = $node->getLine();
-                $this->feedback[] = "Warning!: 'var_dump()' found in `{$this->file}` on line {$line}";
+                $fileWarnings[] = "Warning !: 'var_dump' found on line " . $node->getLine() . "\n";
             }
         }
     });
 
     $traverser->traverse($ast);
 
+    $issues = array_merge($review, $fileWarnings);
+    
     // $issues = [];
     // $lines = file($file);
     // foreach ($lines as $num => $line) {
@@ -52,5 +44,6 @@ foreach ($changedFiles as $file) {
     // }
 }
 
-file_put_contents("feedback.txt", implode("\n", $feedback));
-echo implode("\n", $feedback);
+
+file_put_contents('feedback.txt', implode("\n", $issues));
+echo implode("\n", $issues);
