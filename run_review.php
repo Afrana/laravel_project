@@ -16,7 +16,8 @@ $changedFiles = file('changed_files.txt', FILE_IGNORE_NEW_LINES);
 foreach ($changedFiles as $file) {
     if (!str_ends_with($file, '.php')) continue;
 
-    $review[] = "Reviewing file: $file\n";
+    $fileWarnings = [];
+    $review[] = "$file\n";
     $code = file_get_contents($file);
     $ast = $parser->parse($code);
 
