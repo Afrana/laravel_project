@@ -48,7 +48,7 @@ class UpdatePageRequest extends FormRequest
 
         ], function ($fieldValue) {
             return $fieldValue;
-
+var_dump($fieldValue);
         }, $this->shortLanguageList);
 
         return array_merge([
@@ -75,6 +75,7 @@ class UpdatePageRequest extends FormRequest
             return $fieldValue;
 
         }, $this->shortLanguageList);
+        var_dump($this->shortLanguageList);
 
         return array_merge([
             'parent_id' => __('messages.parent_id'),
