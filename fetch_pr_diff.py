@@ -17,5 +17,3 @@ for file in pr.get_files():
 with open("changed_files.txt", "w") as f:
     for file in changed_files:
         f.write(file + "\n")
-
-print("Done. Found files:", changed_files)

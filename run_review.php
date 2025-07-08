@@ -16,7 +16,7 @@ $changedFiles = file('changed_files.txt', FILE_IGNORE_NEW_LINES);
 foreach ($changedFiles as $file) {
     if (!str_ends_with($file, '.php')) continue;
 
-    echo "Reviewing file: $file\n";
+    $issues[] = "Reviewing file: $file\n";
     $code = file_get_contents($file);
     $ast = $parser->parse($code);
 
@@ -26,20 +26,20 @@ foreach ($changedFiles as $file) {
             if ($node instanceof Node\Expr\FuncCall &&
                 $node->name instanceof Node\Name &&
                 $node->name->toString() === 'var_dump') {
-                echo "Warning !: 'var_dump' found on line " . $node->getLine() . "\n";
+                $issues[] = "Warning !: 'var_dump' found on line " . $node->getLine() . "\n";
             }
         }
     });
 
     $traverser->traverse($ast);
     
-    $issues = [];
-    $lines = file($file);
-    foreach ($lines as $num => $line) {
-        if (strpos($line, 'var_dump') !== false) {
-            $issues[] = "Found var_dump() in `$file` on line " . ($num + 1);
-        }
-    }
+    // $issues = [];
+    // $lines = file($file);
+    // foreach ($lines as $num => $line) {
+    //     if (strpos($line, 'var_dump') !== false) {
+    //         $issues[] = "Found var_dump() in `$file` on line " . ($num + 1);
+    //     }
+    // }
 }
 
 
