@@ -11,14 +11,25 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '7.1'
+          php-version: '8.2'
 
-      - name: Install PHP dependencies
-        run: composer install
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Hotfix missing config (for laravel-multi-menu)
+        run: |
+          mkdir -p vendor/itstructure/laravel-multi-menu/config
+          cp config/multimenu.php vendor/itstructure/laravel-multi-menu/config/multimenu.php
+
+      - name: Laravel package discovery
+        run: php artisan package:discover
 
       - name: Install Python packages
         run: pip install PyGithub
