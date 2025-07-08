@@ -22,7 +22,7 @@ class VarDumpVisitor extends NodeVisitorAbstract {
             $node->name->toString() === 'var_dump') {
 
             $line = $node->getLine();
-            $this->warnings[] = "Warning: 'var_dump()' found on `line no {$line}` ";
+            $this->warnings[] = "line no {$line}";
         }
     }
 
@@ -50,7 +50,7 @@ foreach ($changedFiles as $file) {
     $fileWarnings = $visitor->getWarnings();
 
     if (!empty($fileWarnings)) {
-        $issues[] = "\n`File: $file`";
+        $issues[] = "\nFile: $file";
         $issues = array_merge($issues, $fileWarnings);
     }
 }
