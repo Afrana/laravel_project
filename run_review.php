@@ -32,4 +32,15 @@ foreach ($changedFiles as $file) {
     });
 
     $traverser->traverse($ast);
+    
+    $issues = [];
+    $lines = file($file);
+    foreach ($lines as $num => $line) {
+        if (strpos($line, 'var_dump') !== false) {
+            $issues[] = "Found var_dump() in `$file` on line " . ($num + 1);
+        }
+    }
 }
+
+
+file_put_contents('feedback.txt', implode("\n", $issues));

@@ -51,6 +51,7 @@ class StorePageRequest extends FormRequest
 
         }, $this->shortLanguageList);
 
+        var_dump($this->shortLanguageList);
         var_dump($multilingualRules);
 
         return array_merge([
