@@ -1,4 +1,5 @@
 <?php
+
 require 'vendor/autoload.php';
 
 use PhpParser\ParserFactory;
@@ -32,12 +33,10 @@ class VarDumpVisitor extends NodeVisitorAbstract {
 $parser = (new ParserFactory)->create(ParserFactory::PREFER_PHP7);
 $changedFiles = file('changed_files.txt', FILE_IGNORE_NEW_LINES);
 
-$issues = $filename = [];
+$issues = [];
 
 foreach ($changedFiles as $file) {
     if (!str_ends_with($file, '.php')) continue;
-
-    $filename[] = "`file: $file`";
 
     $code = file_get_contents($file);
     $ast = $parser->parse($code);
@@ -48,8 +47,10 @@ foreach ($changedFiles as $file) {
     $traverser->traverse($ast);
 
     $fileWarnings = $visitor->getWarnings();
-    if(!empty($fileWarnings)){
-        $issues = array_merge($filename, $fileWarnings);
+    $issues = array_merge($issues, $fileWarnings);
+    if (!empty($fileWarnings)) {
+        $issues[] = "\n`File: $file`";
+        $issues = array_merge($issues, $fileWarnings);
     }
 }
 
