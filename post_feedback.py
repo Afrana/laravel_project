@@ -46,6 +46,8 @@ with open("feedback.txt", "r") as f:
 
 current_file = None
 
+review_comments = []
+
 for line in lines:
     file_match = re.match(r'`File: (.*)`', line)
     if file_match:
@@ -56,30 +58,25 @@ for line in lines:
     if current_file and warn_match:
         line_no = int(warn_match.group(1))
 
-        # Find PR file object for current_file
-        pr_file = None
-        for f in pr.get_files():
-            if f.filename == current_file:
-                pr_file = f
-                break
+        # Find file in PR
+        pr_file = next((f for f in pr.get_files() if f.filename == current_file), None)
         if not pr_file:
             print(f"File {current_file} not found in PR files.")
             continue
 
-        # Find position in diff
         position = find_position_in_diff(pr_file.patch or "", line_no)
         if position is None:
             print(f"Could not find diff position for {current_file} line {line_no}")
             continue
 
-        # Post inline review comment
-        repo.create_pull_request_review_comment(
-            pr_number,
-            "⚠️ Avoid using `var_dump()` in committed code.",
-            pr.head.sha,
-            current_file,
-            position
-        )
-        print(f"Comment posted on {current_file} line {line_no} at diff position {position}")
+        review_comments.append({
+            'path': current_file,
+            'position': position,
+            'body': "⚠️ Avoid using `var_dump()` in committed code."
+        })
 
-print("Done posting inline comments.")
+if review_comments:
+    pr.create_review(body="Automated PHP Code Review Feedback", comments=review_comments)
+    print(f"Posted {len(review_comments)} inline comments.")
+else:
+    print("No comments to post.")

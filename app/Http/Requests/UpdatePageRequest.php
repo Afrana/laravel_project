@@ -48,7 +48,7 @@ class UpdatePageRequest extends FormRequest
 
         ], function ($fieldValue) {
             return $fieldValue;
-var_dump($fieldValue);
+
         }, $this->shortLanguageList);
 
         return array_merge([
@@ -57,6 +57,7 @@ var_dump($fieldValue);
             'icon' => 'nullable|string',
 
         ], $multilingualRules);
+        var_dump($fieldValue);
     }
 
     /**
@@ -75,9 +76,6 @@ var_dump($fieldValue);
             return $fieldValue;
 
         }, $this->shortLanguageList);
-        var_dump($this->shortLanguageList);
-        var_dump($this->shortLanguageList);
-        var_dump($this->shortLanguageList);
 
         return array_merge([
             'parent_id' => __('messages.parent_id'),
