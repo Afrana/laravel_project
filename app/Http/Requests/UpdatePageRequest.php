@@ -57,6 +57,8 @@ class UpdatePageRequest extends FormRequest
             'icon' => 'nullable|string',
 
         ], $multilingualRules);
+
+        var_dump($this->shortLanguageList);
     }
 
     /**
