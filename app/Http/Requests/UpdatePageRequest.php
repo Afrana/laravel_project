@@ -82,6 +82,5 @@ class UpdatePageRequest extends FormRequest
             'icon' => __('messages.icon'),
 
         ], $multilingualAttributes);
-        var_dump($this->shortLanguageList);
     }
 }
