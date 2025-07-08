@@ -75,4 +75,5 @@ if review_comments:
     pr.create_review(body="Automated PHP Code Review Feedback", comments=review_comments)
     print(f"Posted {len(review_comments)} inline comments.")
 else:
-    print("No comments to post.")
+    pr.create_issue_comment("Nice implementation!")
+    print("Nice implementation!")
