@@ -9,6 +9,12 @@ g = Github(token)
 repo = g.get_repo(repo_name)
 pr = repo.get_pull(pr_number)
 
-feedback = "**Automated PHP Code Review Summary:**\n\n- ⚠️ Found use of `var_dump()` in `MyClass.php` line 42"
-
-pr.create_issue_comment(feedback)
+if os.path.exists("feedback.txt"):
+    with open("feedback.txt", "r") as f:
+        feedback = f.read()
+    if feedback.strip():
+        pr.create_issue_comment(f"**Automated PHP Code Review Feedback:**\n\n{feedback}")
+    else:
+        print("No feedback to post.")
+else:
+    print("feedback.txt not found.")

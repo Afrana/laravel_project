@@ -50,7 +50,6 @@ class StorePageRequest extends FormRequest
             return $fieldValue;
 
         }, $this->shortLanguageList);
-        var_dump($this->shortLanguageList);
 
         return array_merge([
             'parent_id' => 'nullable|numeric',

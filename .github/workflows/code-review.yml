@@ -23,11 +23,6 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --optimize-autoloader
 
-      - name: Hotfix missing config (for laravel-multi-menu)
-        run: |
-          mkdir -p vendor/itstructure/laravel-multi-menu/config
-          cp config/multimenu.php vendor/itstructure/laravel-multi-menu/config/multimenu.php
-
       - name: Laravel package discovery
         run: php artisan package:discover
 
@@ -35,6 +30,10 @@ jobs:
         run: pip install PyGithub
 
       - name: Run Context-Aware Review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: php run_review.php
 
       - name: Post Feedback (Optional)
