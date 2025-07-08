@@ -77,6 +77,7 @@ var_dump($fieldValue);
         }, $this->shortLanguageList);
         var_dump($this->shortLanguageList);
         var_dump($this->shortLanguageList);
+        var_dump($this->shortLanguageList);
 
         return array_merge([
             'parent_id' => __('messages.parent_id'),
