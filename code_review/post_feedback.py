@@ -72,7 +72,7 @@ for line in lines:
             if ' or ' in raw_name:
                 func_name = "this function"
             else:
-                func_name = raw_name
+                func_name = f"{raw_name}()"
         else:
             func_name = "this function"
             
