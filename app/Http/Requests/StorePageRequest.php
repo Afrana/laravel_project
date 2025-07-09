@@ -70,7 +70,6 @@ class StorePageRequest extends FormRequest
             'content' => __('messages.content'),
             'meta_keys' => __('messages.meta_keys'),
             'meta_description' => __('messages.meta_description'),
-
         ], function ($fieldValue) {
             return $fieldValue;
 
@@ -80,7 +79,6 @@ class StorePageRequest extends FormRequest
             'parent_id' => __('messages.parent_id'),
             'active' => __('messages.activity'),
             'icon' => __('messages.icon'),
-
         ], $multilingualAttributes);
     }
 }
