@@ -19,10 +19,15 @@ class VarDumpVisitor extends NodeVisitorAbstract {
     public function enterNode(Node $node) {
         if ($node instanceof Node\Expr\FuncCall && $node->name instanceof Node\Name) {
             $funcName = $node->name->toString();
-            if (in_array($funcName, ['var_dump', 'print_r', 'die', 'exit', 'eval'])) {
+            if (in_array($funcName, ['var_dump', 'print_r', 'eval'])) {
                 $line = $node->getLine();
                 $this->warnings[] = "Use of '$funcName()' found on line no {$line}";
             }
+        }
+
+        if ($node instanceof Node\Expr\Exit_) {
+            $line = $node->getLine();
+            $this->warnings[] = "Use of 'exit or die' found on line no {$line}";
         }
     }
 
