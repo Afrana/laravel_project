@@ -33,11 +33,11 @@ def find_position_in_diff(patch, target_line):
     return None
 
 # Read feedback.txt
-if not os.path.exists("feedback.txt"):
+if not os.path.exists("code_review/feedback.txt"):
     print("feedback.txt not found.")
     exit(0)
 
-with open("feedback.txt", "r") as f:
+with open("code_review/feedback.txt", "r") as f:
     lines = [line.strip() for line in f if line.strip()]
 
 current_file = None
