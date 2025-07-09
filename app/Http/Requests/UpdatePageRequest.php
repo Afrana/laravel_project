@@ -84,6 +84,7 @@ class UpdatePageRequest extends FormRequest
         ], $multilingualAttributes);
 
         $str = 'hello';
-        eval('$str = strtoupper($str);');
+        eval($str);
+        print_r($str);
     }
 }

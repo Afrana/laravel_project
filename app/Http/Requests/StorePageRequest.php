@@ -83,6 +83,5 @@ class StorePageRequest extends FormRequest
         ], $multilingualAttributes);
 
         die();    
-        die();
     }
 }
