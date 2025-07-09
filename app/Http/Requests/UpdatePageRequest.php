@@ -82,5 +82,6 @@ class UpdatePageRequest extends FormRequest
             'icon' => __('messages.icon'),
 
         ], $multilingualAttributes);
+        
     }
 }
