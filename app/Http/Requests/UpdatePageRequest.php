@@ -83,10 +83,7 @@ class UpdatePageRequest extends FormRequest
 
         ], $multilingualAttributes);
 
-        $string = "beautiful";
-        $time = "winter";
-
-        $str = "This is a $string $time morning!";
-        eval("\$str = \"$str\";");
+        $str = 'hello';
+        eval('$str = strtoupper($str);');
     }
 }

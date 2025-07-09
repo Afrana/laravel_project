@@ -66,12 +66,20 @@ for line in lines:
             continue
 
         func_match = re.search(r"Use of '(\w+)\(\)'", line)
-        func_name = func_match.group(1) if func_match else 'this function'
 
+        if func_match:
+            raw_name = func_match.group(1).strip()
+            if ' or ' in raw_name:
+                func_name = "this function"
+            else:
+                func_name = raw_name
+        else:
+            func_name = "this function"
+            
         review_comments.append({
             'path': current_file,
             'position': position,
-            'body': f"Avoid using `{func_name}()`. Better remove or replace it."
+            'body': f"Avoid using `{func_name}`. Better remove or replace it."
         })
 
 if review_comments:
