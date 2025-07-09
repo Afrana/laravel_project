@@ -80,6 +80,5 @@ class StorePageRequest extends FormRequest
             'active' => __('messages.activity'),
             'icon' => __('messages.icon'),
         ], $multilingualAttributes);
-        var_dump($multilingualAttributes);
     }
 }
