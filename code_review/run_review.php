@@ -1,5 +1,5 @@
 <?php
-shell_exec("python3 fetch_pr_diff.py");
+shell_exec("python3 code_review/fetch_pr_diff.py");
 
 require 'vendor/autoload.php';
 
@@ -32,7 +32,7 @@ class VarDumpVisitor extends NodeVisitorAbstract {
 }
 
 $parser = (new ParserFactory)->create(ParserFactory::PREFER_PHP7);
-$changedFiles = file('changed_files.txt', FILE_IGNORE_NEW_LINES);
+$changedFiles = file('code_review/changed_files.txt', FILE_IGNORE_NEW_LINES);
 
 $issues = [];
 
@@ -55,5 +55,5 @@ foreach ($changedFiles as $file) {
     }
 }
 
-file_put_contents('feedback.txt', implode("\n", $issues));
+file_put_contents('code_review/feedback.txt', implode("\n", $issues));
 echo implode("\n", $issues);

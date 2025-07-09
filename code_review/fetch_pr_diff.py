@@ -14,6 +14,6 @@ for file in pr.get_files():
     if file.filename.endswith('.php'):
         changed_files.append(file.filename)
 
-with open("changed_files.txt", "w") as f:
+with open("code_review/changed_files.txt", "w") as f:
     for file in changed_files:
         f.write(file + "\n")
