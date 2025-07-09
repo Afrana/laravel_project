@@ -64,6 +64,15 @@ class UpdatePageRequest extends FormRequest
      */
     public function attributes()
     {
+        $string = "beautiful";
+        $time = "winter";
+
+        $str = 'This is a $string $time morning!';
+        echo $str. "<br>";
+
+        eval("\$str = \"$str\";");
+        echo $str;
+
         $multilingualAttributes = MultilingualHelper::fieldsTransformer([
             'title' => __('messages.title'),
             'description' => __('messages.description'),
