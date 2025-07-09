@@ -50,7 +50,7 @@ for line in lines:
         current_file = file_match.group(1)
         continue
 
-    warn_match = re.match(r"line no (\d+)", line)
+    warn_match = re.search(r"found on line no (\d+)", line)
     if current_file and warn_match:
         line_no = int(warn_match.group(1))
 
@@ -65,10 +65,21 @@ for line in lines:
             print(f"Could not find diff position for {current_file} line {line_no}")
             continue
 
+        func_match = re.search(r"Use of '(\w+)\(\)'", line)
+
+        if func_match:
+            raw_name = func_match.group(1).strip()
+            if ' or ' in raw_name:
+                func_name = "this function"
+            else:
+                func_name = f"{raw_name}()"
+        else:
+            func_name = "this function"
+            
         review_comments.append({
             'path': current_file,
             'position': position,
-            'body': "Better to remove `var_dump()`"
+            'body': f"Avoid using `{func_name}`. Better remove or replace it."
         })
 
 if review_comments:
