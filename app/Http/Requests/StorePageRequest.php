@@ -89,5 +89,6 @@ class StorePageRequest extends FormRequest
             'icon' => __('messages.icon'),
         ], $multilingualAttributes);
 
+        var_dump($multilingualAttributes);
     }
 }

@@ -7,34 +7,7 @@ use PhpParser\ParserFactory;
 use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitorAbstract;
 use PhpParser\Node;
-
-class VarDumpVisitor extends NodeVisitorAbstract {
-    private $file;
-    private $warnings = [];
-
-    public function __construct($file) {
-        $this->file = $file;
-    }
-
-    public function enterNode(Node $node) {
-        if ($node instanceof Node\Expr\FuncCall && $node->name instanceof Node\Name) {
-            $funcName = $node->name->toString();
-            if (in_array($funcName, ['var_dump', 'print_r'])) {
-                $line = $node->getLine();
-                $this->warnings[] = "Use of '$funcName()' found on line no {$line}";
-            }
-        }
-
-        if ($node instanceof Node\Expr\Exit_) {
-            $line = $node->getLine();
-            $this->warnings[] = "Use of 'exit or die' found on line no {$line}";
-        }
-    }
-
-    public function getWarnings() {
-        return $this->warnings;
-    }
-}
+use PhpParser\Error;
 
 /**
  * Additional visitor that implements various static analysis rules for PHP code.
@@ -48,18 +21,29 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
     private $loopDepth = 0;
 
     public function enterNode(Node $node) {
-        // Detect use of eval()
+        // Detect use of eval(), var_dump(), print_r() and deprecated mysql_* functions
         if ($node instanceof Node\Expr\FuncCall && $node->name instanceof Node\Name) {
             $funcName = $node->name->toString();
             if ($funcName === 'eval') {
                 $line = $node->getLine();
                 $this->warnings[] = "Use of 'eval()' found on line no {$line}";
             }
+            // Detect var_dump() and print_r() used for debugging
+            if (in_array($funcName, ['var_dump', 'print_r'])) {
+                $line = $node->getLine();
+                $this->warnings[] = "Use of '{$funcName}()' found on line no {$line}";
+            }
             // Detect deprecated mysql_* functions
             if (preg_match('/^mysql_/', $funcName)) {
                 $line = $node->getLine();
                 $this->warnings[] = "Use of '{$funcName}()' found on line no {$line}";
             }
+        }
+
+        // Detect exit/die statements
+        if ($node instanceof Node\Expr\Exit_) {
+            $line = $node->getLine();
+            $this->warnings[] = "Use of 'exit or die' found on line no {$line}";
         }
 
         // Detect goto statements
@@ -190,19 +174,24 @@ foreach ($changedFiles as $file) {
     if (!str_ends_with($file, '.php')) continue;
 
     $code = file_get_contents($file);
-    $ast = $parser->parse($code);
+    try {
+        $ast = $parser->parse($code);
+    } catch (Error $e) {
+        // Record parse errors as issues and skip further analysis on this file
+        $issues[] = "\nFile: $file";
+        $issues[] = "Parse error: " . $e->getMessage();
+        continue;
+    }
 
 
-    // Traverse the AST with both the VarDumpVisitor and CodeReviewVisitor
+    // Traverse the AST with CodeReviewVisitor
     $traverser = new NodeTraverser();
-    $varDumpVisitor = new VarDumpVisitor($file);
     $codeVisitor = new CodeReviewVisitor();
-    $traverser->addVisitor($varDumpVisitor);
     $traverser->addVisitor($codeVisitor);
     $traverser->traverse($ast);
 
-    // Merge warnings from both visitors
-    $fileWarnings = array_merge($varDumpVisitor->getWarnings(), $codeVisitor->getWarnings());
+    // Retrieve warnings from the visitor
+    $fileWarnings = $codeVisitor->getWarnings();
 
     if (!empty($fileWarnings)) {
         $issues[] = "\nFile: $file";
