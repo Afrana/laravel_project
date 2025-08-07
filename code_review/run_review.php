@@ -36,6 +36,13 @@ class VarDumpVisitor extends NodeVisitorAbstract {
     }
 }
 
+/**
+ * Additional visitor that implements various static analysis rules for PHP code.
+ *
+ * This visitor checks for discouraged language features (eval/goto/mysql_* functions),
+ * naming conventions, long methods, nested loops, usage of superglobals,
+ * magic numbers, global variables, error suppression and empty catch blocks.
+ */
 class CodeReviewVisitor extends NodeVisitorAbstract {
     private $warnings = [];
     private $loopDepth = 0;
@@ -184,6 +191,7 @@ foreach ($changedFiles as $file) {
 
     $code = file_get_contents($file);
     $ast = $parser->parse($code);
+
 
     // Traverse the AST with both the VarDumpVisitor and CodeReviewVisitor
     $traverser = new NodeTraverser();
