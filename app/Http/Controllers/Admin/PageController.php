@@ -105,4 +105,10 @@ class PageController extends AdminController
 
         return view('admin.page.view', compact('model', 'languageList'));
     }
+
+    function foo() {
+        $unused = 123; // should trigger a warning
+        $used   = 456;
+        echo $used;
+    }
 }
