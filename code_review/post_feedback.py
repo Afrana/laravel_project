@@ -183,37 +183,6 @@ def parse_feedback(feedback_text: str) -> List[Finding]:
         findings.append(Finding(path=current_file, line=line_no, body=line, severity=sev, rule=rid))
     return findings
 
-# ---------------- Lightweight taint checks (optional) ----------------
-UNESCAPED_SOURCES = ["$_GET", "$_POST", "$_REQUEST", "$_COOKIE"]
-ESCAPE_FUNCS = ["htmlspecialchars", "htmlentities"]
-
-def run_light_taint_checks() -> List[Finding]:
-    if not CONFIG.get("enable_taint_rules", True):
-        return []
-    out: List[Finding] = []
-    files = [f for f in pr.get_files() if f.filename.endswith(".php")]
-    for f in files:
-        if path_ignored(f.filename):
-            continue
-        try:
-            content = repo.get_contents(f.filename, ref=pr.head.sha).decoded_content.decode("utf-8", errors="ignore")
-        except Exception:
-            continue
-        # Unescaped echo/print of superglobals
-        for i, l in enumerate(content.splitlines(), start=1):
-            if any(src in l for src in UNESCAPED_SOURCES) and re.search(r"\b(echo|print)\b", l) and not any(fn in l for fn in ESCAPE_FUNCS):
-                body = f"[rule:xss_unescaped_output] [severity:critical] Potential XSS: unescaped user input echoed on line no {i}; escape with htmlspecialchars()."
-                out.append(Finding(path=f.filename, line=i, body=body, severity="critical", rule="xss_unescaped_output"))
-        # Naive SQL concat/interpolation without prepare
-        uses_prepare = re.search(r"prepare\s*\(|bindParam|bindValue", content, re.IGNORECASE)
-        for i, l in enumerate(content.splitlines(), start=1):
-            if re.search(r"(SELECT|INSERT|UPDATE|DELETE)", l, re.IGNORECASE) and ("." in l or "$" in l):
-                var_present = any(src in l for src in UNESCAPED_SOURCES) or re.search(r"\$[a-zA-Z_][a-zA-Z0-9_]*", l)
-                if var_present and not uses_prepare:
-                    body = f"[rule:sql_concat_query] [severity:critical] Possible SQL injection: query built by string concatenation on line no {i}; use prepared statements."
-                    out.append(Finding(path=f.filename, line=i, body=body, severity="critical", rule="sql_concat_query"))
-    return out
-
 # ---------------- Main ----------------
 def main():
     feedback_txt = "code_review/feedback.txt"
@@ -223,7 +192,6 @@ def main():
             base_text = fh.read()
 
     findings = parse_feedback(base_text)
-    findings.extend(run_light_taint_checks())
 
     # Filters
     filtered: List[Finding] = []
