@@ -24,13 +24,6 @@ class StorePageRequest extends FormRequest
         parent::__construct();
 
         $this->shortLanguageList = Language::shortLanguageList();
-
-        // nested loops
-        for ($i = 0; $i < 2; $i++) {
-            foreach ([1, 2] as $j) {
-                // inner loop to trigger nested loop warning
-            }
-        }
     }
 
     /**
@@ -89,6 +82,5 @@ class StorePageRequest extends FormRequest
             'icon' => __('messages.icon'),
         ], $multilingualAttributes);
 
-        var_dump($multilingualAttributes);
     }
 }

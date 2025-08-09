@@ -15,8 +15,6 @@ class UpdatePageRequest extends FormRequest
      * @var array
      */
     protected $shortLanguageList = [];
-    // // goto statement
-    // goto end_label;
 
     /**
      * StorePage constructor.
