@@ -8,7 +8,7 @@ from typing import List, Optional, Dict
 
 # ---------------- Config schema ----------------
 DEFAULT_CONFIG = {
-    "min_severity": "warning",             # info | warning | critical
+    "min_severity": "info",             # info | warning | critical
     "max_inline_comments": 30,
     "paths": {
         "ignore": ["vendor/**", "storage/**", "tests/**", "**/.history/**"],
