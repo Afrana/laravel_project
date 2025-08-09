@@ -26,6 +26,8 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
     private $functionContexts = [];
     // Stack to track the variable being assigned to avoid counting the left-hand side as a use
     private $assignmentVarStack = [];
+    // Stack of contexts to track declared properties and their usages within classes
+    private $classContexts = [];
 
     public function enterNode(Node $node) {
         // When entering a function or class method, initialise a new context for tracking
@@ -34,6 +36,15 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
                 'assigns' => [],
                 'uses'    => [],
                 'node'    => $node,
+            ];
+        }
+
+        // When entering a class, initialise a new class context
+        if ($node instanceof Node\Stmt\Class_) {
+            $this->classContexts[] = [
+                'class' => $node,
+                'props' => [], // declared properties (name => line)
+                'uses'  => [], // property usages (name => count)
             ];
         }
         // Detect use of eval(), var_dump(), print_r() and deprecated mysql_* functions
@@ -104,6 +115,14 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
 
         // Naming conventions for private/protected properties (underscore prefix)
         if ($node instanceof Node\Stmt\Property) {
+            // Record declared property names in current class context for unused detection
+            if (!empty($this->classContexts)) {
+                $classCtxIndex = count($this->classContexts) - 1;
+                foreach ($node->props as $prop) {
+                    $propName = $prop->name->toString();
+                    $this->classContexts[$classCtxIndex]['props'][$propName] = $node->getLine();
+                }
+            }
             if ($node->isPrivate() || $node->isProtected()) {
                 foreach ($node->props as $prop) {
                     $propName = $prop->name->toString();
@@ -336,6 +355,21 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
                 }
             }
         }
+
+        // Record property usage within classes (e.g., $this->property)
+        if ($node instanceof Node\Expr\PropertyFetch && !empty($this->classContexts)) {
+            // Ensure the property is accessed on $this (instance context)
+            if ($node->var instanceof Node\Expr\Variable && $node->var->name === 'this') {
+                if ($node->name instanceof Node\Identifier) {
+                    $propName = $node->name->toString();
+                    $classCtxIndex = count($this->classContexts) - 1;
+                    if (!isset($this->classContexts[$classCtxIndex]['uses'][$propName])) {
+                        $this->classContexts[$classCtxIndex]['uses'][$propName] = 0;
+                    }
+                    $this->classContexts[$classCtxIndex]['uses'][$propName]++;
+                }
+            }
+        }
     }
 
     public function leaveNode(Node $node) {
@@ -361,6 +395,19 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
                     foreach ($lines as $assignLine) {
                         $this->warnings[] = "Variable '$$varName' assigned but never used in function/method '{$functionName}' on line no {$assignLine}; remove or use the variable";
                     }
+                }
+            }
+        }
+
+        if ($node instanceof Node\Stmt\Class_ && !empty($this->classContexts)) {
+            $ctx = array_pop($this->classContexts);
+            $declared = $ctx['declaredProps'];
+            $used     = $ctx['uses'];
+            $class    = $ctx['name'];
+
+            foreach ($declared as $propName => $declLine) {
+                if (!array_key_exists($propName, $used)) {
+                    $this->warnings[] = "Property '{$propName}' declared in class '{$class}' on line no {$declLine} is never used; remove it or use it";
                 }
             }
         }
