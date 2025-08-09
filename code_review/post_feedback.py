@@ -1,4 +1,3 @@
-python
 from github import Github
 import os
 import re
