@@ -1,0 +1,163 @@
+{
+  "min_severity": "info",
+  "max_inline_comments": 30,
+  "paths": {
+    "ignore": [
+      "vendor/**",
+      "storage/**",
+      "tests/**"
+    ],
+    "only": []
+  },
+  "enable_taint_rules": true,
+  "rules": {
+    "eval_usage": {
+      "enabled": true,
+      "severity": "critical"
+    },
+    "debug_call": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "deprecated_mysql": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "exit_die": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "goto_usage": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "camel_function": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "verb_function": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "long_function": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "studly_class": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "underscore_private_prop": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "superglobal_use": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "nested_loop": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "magic_number": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "hardcoded_value": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "const_caps": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "var_camel": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "missing_phpdoc": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "global_usage": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "error_suppression": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_catch": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_finally": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_if": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_elseif": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_else": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_foreach": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_for": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_while": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_do_while": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_switch_case": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_function": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "empty_method": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "unused_local": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "unused_property": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "short_open_tag": {
+      "enabled": true,
+      "severity": "warning"
+    },
+    "closing_tag": {
+      "enabled": true,
+      "severity": "info"
+    },
+    "xss_unescaped_output": {
+      "enabled": true,
+      "severity": "critical"
+    },
+    "sql_concat_query": {
+      "enabled": true,
+      "severity": "critical"
+    }
+  }
+}

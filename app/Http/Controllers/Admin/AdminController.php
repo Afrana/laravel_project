@@ -16,3 +16,20 @@ class AdminController extends BaseController
 {
     use AuthorizesRequests, DispatchesJobs, ValidatesRequests;
 }
+
+class bad_class_name {
+    private $radius; // should be _radius
+
+    public function doSomething() {
+        // short method does nothing
+    }
+
+    // long method with many lines
+    public function longFunction() {
+        $sum = 0;
+        for ($i = 0; $i < 60; $i++) {
+            $sum += $i;
+        }
+        return $sum;
+    }
+}

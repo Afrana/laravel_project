@@ -92,9 +92,23 @@ class PageController extends AdminController
      */
     public function view(int $id)
     {
+        // use of var_dump and print_r
+        var_dump("debug");
+        print_r(["a" => 1]);
+
+        // global variable usage and magic number
+        global $foo;
+        $foo = 42; // magic number
+
         $model = Page::findOrFail($id);
         $languageList = Language::languageList();
 
         return view('admin.page.view', compact('model', 'languageList'));
+    }
+
+    function foo() {
+        $unused = 123; // should trigger a warning
+        $used   = 456;
+        echo $used;
     }
 }
