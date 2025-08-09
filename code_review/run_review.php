@@ -41,12 +41,15 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
 
         // When entering a class, initialise a new class context
         if ($node instanceof Node\Stmt\Class_) {
+            $className = $node->name ? $node->name->toString() : '(anonymous)';
+
             $this->classContexts[] = [
-                'class' => $node,
-                'props' => [], // declared properties (name => line)
-                'uses'  => [], // property usages (name => count)
+                'name'          => $className,
+                'declaredProps' => [],  // prop => line
+                'uses'          => [],  // prop => count
             ];
         }
+
         // Detect use of eval(), var_dump(), print_r() and deprecated mysql_* functions
         if ($node instanceof Node\Expr\FuncCall && $node->name instanceof Node\Name) {
             $funcName = $node->name->toString();
@@ -115,14 +118,6 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
 
         // Naming conventions for private/protected properties (underscore prefix)
         if ($node instanceof Node\Stmt\Property) {
-            // Record declared property names in current class context for unused detection
-            if (!empty($this->classContexts)) {
-                $classCtxIndex = count($this->classContexts) - 1;
-                foreach ($node->props as $prop) {
-                    $propName = $prop->name->toString();
-                    $this->classContexts[$classCtxIndex]['props'][$propName] = $node->getLine();
-                }
-            }
             if ($node->isPrivate() || $node->isProtected()) {
                 foreach ($node->props as $prop) {
                     $propName = $prop->name->toString();
@@ -131,6 +126,16 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
                         $this->warnings[] = "Property '{$propName}' should start with an underscore found on line no {$line}; prefix private/protected properties with '_'";
                     }
                 }
+            }
+        }
+
+       if ($node instanceof Node\Stmt\Property && !empty($this->classContexts)) {
+            $i = count($this->classContexts) - 1;
+
+            foreach ($node->props as $prop) {
+                $propName = $prop->name->toString();
+                // Always register declaration so we can detect unused
+                $this->classContexts[$i]['declaredProps'][$propName] = $node->getLine();
             }
         }
 
@@ -357,16 +362,12 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
         }
 
         // Record property usage within classes (e.g., $this->property)
-        if ($node instanceof Node\Expr\PropertyFetch && !empty($this->classContexts)) {
-            // Ensure the property is accessed on $this (instance context)
+         if ($node instanceof Node\Expr\PropertyFetch && !empty($this->classContexts)) {
             if ($node->var instanceof Node\Expr\Variable && $node->var->name === 'this') {
                 if ($node->name instanceof Node\Identifier) {
                     $propName = $node->name->toString();
-                    $classCtxIndex = count($this->classContexts) - 1;
-                    if (!isset($this->classContexts[$classCtxIndex]['uses'][$propName])) {
-                        $this->classContexts[$classCtxIndex]['uses'][$propName] = 0;
-                    }
-                    $this->classContexts[$classCtxIndex]['uses'][$propName]++;
+                    $i = count($this->classContexts) - 1;
+                    $this->classContexts[$i]['uses'][$propName] = ($this->classContexts[$i]['uses'][$propName] ?? 0) + 1;
                 }
             }
         }
