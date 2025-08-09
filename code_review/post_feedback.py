@@ -238,7 +238,7 @@ def main():
 
     # Inline vs summary
     inline_items = [f for f in filtered if f.path and f.line]
-    summary_items = [f for f in filtered if not (f.path or f.line)]
+    summary_items = [f for f in filtered if not (f.path and f.line)]
 
     # Inline review comments (respect cap)
     comments = []
@@ -261,13 +261,12 @@ def main():
         for f in summary_items:
             key = f.path or "General"
             by_file.setdefault(key, []).append(f)
-        lines = ["**Summary of non-inline findings:**\n"]
+        lines = ["**Other code review suggesions:**\n"]
         for path, items in by_file.items():
             lines.append(f"- **{path}**")
             for it in items:
                 sev = it.severity.upper()
-                rid = f" ({it.rule})" if it.rule else ""
-                lines.append(f"  - [{sev}]{rid} {it.body}")
+                lines.append(f"  - [{sev}] {it.body}")
         pr.create_issue_comment("\n".join(lines))
 
     if not comments and not summary_items:
