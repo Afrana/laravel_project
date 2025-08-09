@@ -29,6 +29,15 @@ jobs:
       - name: Install Python packages
         run: pip install PyGithub
 
+      # Fetch list of changed PHP files for context-aware analysis
+      - name: Fetch changed PHP files
+        run: |
+          python3 code_review/fetch_pr_diff.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+
       # Install additional PHP static analysis tools for advanced checks
       - name: Install PHP static analysis tools
         run: |
@@ -38,15 +47,34 @@ jobs:
       # Run PHPStan to perform advanced static analysis (type checking, code quality)
       - name: Run PHPStan Analysis
         run: |
-          # Run PHPStan against the project and write the raw output to a file. Ignore exit code to continue workflow.
-          vendor/bin/phpstan analyse --no-progress --error-format=raw > code_review/phpstan_output.txt || true
+          # Read list of changed PHP files and run PHPStan on them. If none, skip analysis.
+          if [ -f code_review/changed_files.txt ]; then
+            files="$(cat code_review/changed_files.txt | tr '\n' ' ')"
+          else
+            files=""
+          fi
+          if [ -n "$files" ]; then
+            vendor/bin/phpstan analyse $files --no-progress --error-format=raw > code_review/phpstan_output.txt || true
+          else
+            echo "No changed PHP files for PHPStan analysis." > code_review/phpstan_output.txt
+          fi
         continue-on-error: true
 
       # Run PHPMD to detect potential problems, unused code, complexity issues, etc.
       - name: Run PHPMD Analysis
         run: |
-          # Run PHPMD with commonly used rule sets and write the output to a file. Ignore exit code to continue workflow.
-          vendor/bin/phpmd . text cleancode,codesize,controversial,design,naming,unusedcode --suffixes php > code_review/phpmd_output.txt || true
+          # Read list of changed PHP files and run PHPMD on them. If none, skip analysis.
+          if [ -f code_review/changed_files.txt ]; then
+            # Join file paths with commas for PHPMD
+            files="$(paste -s -d, code_review/changed_files.txt)"
+          else
+            files=""
+          fi
+          if [ -n "$files" ]; then
+            vendor/bin/phpmd $files text cleancode,codesize,controversial,design,naming,unusedcode --suffixes php > code_review/phpmd_output.txt || true
+          else
+            echo "No changed PHP files for PHPMD analysis." > code_review/phpmd_output.txt
+          fi
         continue-on-error: true
 
       - name: Run Context-Aware Review
