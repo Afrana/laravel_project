@@ -1,44 +1,63 @@
-name: PHP Context-Aware Code Review
+name: Context-Aware PHP Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - '**.php'
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
-  code-review:
+  review:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-          ref: ${{ github.head_ref }}
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
+          tools: composer
 
-      - name: Install dependencies
-        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+      - name: Install PHP deps (PhpParser)
+        run: |
+          if [ ! -f composer.json ]; then
+            echo '{ "require": { "nikic/php-parser": "^4.18" } }' > composer.json
+          else
+            jq '.require."nikic/php-parser"="^4.18"' composer.json > composer.tmp.json || true
+            mv composer.tmp.json composer.json || true
+          fi
+          composer install --no-interaction --no-progress
 
-      - name: Laravel package discovery
-        run: php artisan package:discover
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Install Python packages
-        run: pip install PyGithub
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyGithub
 
-      - name: Run Context-Aware Review
+      - name: Run review (fetch diff, analyze, post feedback)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: php code_review/run_review.php
+        run: |
+          mkdir -p code_review
+          cp -r . code_review >/dev/null 2>&1 || true
+          python /github/workspace/code_review/fetch_pr_diff.py
+          php /github/workspace/code_review/run_review.php
+          python /github/workspace/code_review/post_feedback.py
 
-      - name: Post Feedback (Optional)
-        run: python3 code_review/post_feedback.py
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+      - name: Upload SARIF (optional)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: code_review/findings.sarif
+          category: context-php-review

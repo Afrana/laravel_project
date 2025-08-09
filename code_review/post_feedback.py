@@ -1,276 +1,153 @@
+import os, json, hashlib, time
 from github import Github
-import os
-import re
-import json
-import fnmatch
-from dataclasses import dataclass
-from typing import List, Optional, Dict
 
-# ---------------- Constants ----------------
-SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
 CONFIG_PATH = "code_review/phpcodereview.json"
+FINDINGS_PATH = "code_review/findings.json"
+HUNKS_PATH = "code_review/changed_hunks.json"
+LABELS_PATH = "code_review/labels.json"
 
-# ---------------- Config (required) ----------------
-def load_config() -> Dict:
-    if not os.path.exists(CONFIG_PATH):
-        raise FileNotFoundError(f"Required config file not found: {CONFIG_PATH}")
-    with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+def load_config():
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Fail-soft default config
+        return {
+            "min_severity": "warning",
+            "comment_cap": 30,
+            "group_similar": True,
+            "severity": {}
+        }
 
-CONFIG = load_config()
+SEV_RANK = {"info": 0, "warning": 1, "critical": 2}
 
-# ---------------- GitHub setup ----------------
-TOKEN = os.environ.get("GITHUB_TOKEN")
-REPO_NAME = os.environ.get("GITHUB_REPOSITORY")
-PR_NUMBER = int(os.environ.get("PR_NUMBER", "0"))
-
-g = Github(TOKEN)
-repo = g.get_repo(REPO_NAME)
-pr = repo.get_pull(PR_NUMBER)
-
-# ---------------- Data model ----------------
-@dataclass
-class Finding:
-    path: str
-    line: Optional[int]
-    body: str
-    severity: str = "warning"
-    rule: Optional[str] = None
-
-# ---------------- Rule inference (fallbacks) ----------------
-INFER_RULE_MAP = [
-    ("eval_usage", re.compile(r"\beval\(\)", re.I)),
-    ("debug_call", re.compile(r"\b(var_dump|print_r)\s*\(", re.I)),
-    ("deprecated_mysql", re.compile(r"\bmysql_\w+\s*\(", re.I)),
-    ("exit_die", re.compile(r"\b(exit|die)\b", re.I)),
-    ("goto_usage", re.compile(r"\bgoto\b", re.I)),
-    ("camel_function", re.compile(r"Function '.*' does not follow camelCase", re.I)),
-    ("verb_function", re.compile(r"Function '.*' should start with a verb", re.I)),
-    ("long_function", re.compile(r"too long \(\d+ lines\)", re.I)),
-    ("studly_class", re.compile(r"does not follow StudlyCaps", re.I)),
-    ("underscore_private_prop", re.compile(r"Property '.*' should start with an underscore", re.I)),
-    ("superglobal_use", re.compile(r"Use of superglobal", re.I)),
-    ("nested_loop", re.compile(r"Nested loop", re.I)),
-    ("magic_number", re.compile(r"Magic number", re.I)),
-    ("hardcoded_value", re.compile(r"Hard-?coded value", re.I)),
-    ("const_caps", re.compile(r"Class constant '.*' should be in ALL_CAPS", re.I)),
-    ("var_camel", re.compile(r"Variable '\$.*' does not follow lowerCamelCase", re.I)),
-    ("missing_phpdoc", re.compile(r"missing PHPDoc", re.I)),
-    ("global_usage", re.compile(r"Use of 'global'", re.I)),
-    ("error_suppression", re.compile(r"Use of '@' operator", re.I)),
-    ("empty_catch", re.compile(r"Empty catch block", re.I)),
-    ("empty_finally", re.compile(r"Empty finally block", re.I)),
-    ("empty_if", re.compile(r"Empty if block", re.I)),
-    ("empty_elseif", re.compile(r"Empty elseif block", re.I)),
-    ("empty_else", re.compile(r"Empty else block", re.I)),
-    ("empty_foreach", re.compile(r"Empty foreach body", re.I)),
-    ("empty_for", re.compile(r"Empty for loop body", re.I)),
-    ("empty_while", re.compile(r"Empty while loop body", re.I)),
-    ("empty_do_while", re.compile(r"Empty do-while loop body", re.I)),
-    ("empty_switch_case", re.compile(r"Empty .* block in switch", re.I)),
-    ("empty_function", re.compile(r"Empty function '", re.I)),
-    ("empty_method", re.compile(r"Empty method '", re.I)),
-    ("unused_local", re.compile(r"assigned but never used", re.I)),
-    ("unused_property", re.compile(r"never used; remove it or use it", re.I)),
-    ("short_open_tag", re.compile(r"Short open tag", re.I)),
-    ("closing_tag", re.compile(r"Closing \?>.*pure PHP files", re.I)),
-]
-
-EXPLICIT_RULE_RX = re.compile(r"\[rule:([a-z0-9_.:-]+)\]", re.I)
-EXPLICIT_SEV_RX = re.compile(r"\[severity:(critical|warning|info)\]", re.I)
-
-# ---------------- Helpers ----------------
-def path_ignored(path: str) -> bool:
-    only = CONFIG.get("paths", {}).get("only", [])
-    if only and not any(fnmatch.fnmatch(path, pat) for pat in only):
-        return True
-    for pat in CONFIG.get("paths", {}).get("ignore", []):
-        if fnmatch.fnmatch(path, pat):
-            return True
-    return False
-
-def min_sev_allows(sev: str) -> bool:
-    want = CONFIG.get("min_severity", "info").lower()
-    return SEVERITY_ORDER.get(sev, 1) >= SEVERITY_ORDER.get(want, 1)
-
-def rule_enabled(rule: Optional[str]) -> bool:
-    if rule is None:
-        return True
-    cfg = CONFIG.get("rules", {}).get(rule)
-    if cfg is None:
-        return True  # unspecified = enabled
-    return cfg.get("enabled", True)
-
-def rule_severity_override(rule: Optional[str]) -> Optional[str]:
-    if rule and rule in CONFIG.get("rules", {}):
-        sev = CONFIG["rules"][rule].get("severity")
-        if sev in SEVERITY_ORDER:
-            return sev
-    return None
-
-def infer_rule(msg: str) -> Optional[str]:
-    m = EXPLICIT_RULE_RX.search(msg)
-    if m:
-        return m.group(1).lower()
-    for rid, rx in INFER_RULE_MAP:
-        if rx.search(msg):
-            return rid
-    return None
-
-def infer_severity(msg: str, rule: Optional[str]) -> str:
-    m = EXPLICIT_SEV_RX.search(msg)
-    if m:
-        return m.group(1).lower()
-    override = rule_severity_override(rule)
-    if override:
-        return override
-    low = msg.lower()
-    if any(k in low for k in ["sql injection", "xss", "unescaped", "eval()", "danger", "shell_exec", "system(", "secrets", "deserializ"]):
+def min_severity_from_labels(labels, default_min):
+    if "review:strict" in labels:
+        return "info"
+    if "review:critical-only" in labels:
         return "critical"
-    if any(k in low for k in ["exit", "die", "global", "goto", "error suppression", "@ operator"]):
-        return "warning"
-    return "info"
+    return default_min
 
-def find_position_in_diff(patch: str, target_line: int) -> Optional[int]:
-    if not patch:
-        return None
-    position = 0
-    current_new = 0
-    current_old = 0
-    for line in patch.splitlines():
-        position += 1
-        if line.startswith("@@"):
-            m = re.search(r"\+([0-9]+)", line)
-            if m:
-                current_new = int(m.group(1)) - 1
+def load_json(path, default):
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+
+def filter_to_hunks(findings, hunks_map):
+    # keep items whose line falls within any added hunk (start..start+len-1)
+    out = []
+    for it in findings:
+        file = it.get("file")
+        line = int(it.get("line", 0))
+        if not file or file not in hunks_map:
             continue
-        if line.startswith("+"):
-            current_new += 1
-            if current_new == target_line:
-                return position
-        elif line.startswith("-"):
-            current_old += 1
-        else:
-            current_new += 1
-            current_old += 1
-            if current_new == target_line:
-                return position
-    return None
-
-def parse_feedback(feedback_text: str) -> List[Finding]:
-    findings: List[Finding] = []
-    current_file: Optional[str] = None
-    for raw in feedback_text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-
-        mfile = re.match(r"File:\s+(.*)$", line)
-        if mfile:
-            current_file = mfile.group(1)
-            continue
-
-        if current_file is None:
-            rid = infer_rule(line)
-            sev = infer_severity(line, rid)
-            findings.append(Finding(path="", line=None, body=line, severity=sev, rule=rid))
-            continue
-
-        mline = re.search(r"line no\s*(\d+)", line, re.I)
-        line_no = int(mline.group(1)) if mline else None
-        rid = infer_rule(line)
-        sev = infer_severity(line, rid)
-        findings.append(Finding(path=current_file, line=line_no, body=line, severity=sev, rule=rid))
-    return findings
-
-# ---------------- Lightweight taint checks (optional) ----------------
-UNESCAPED_SOURCES = ["$_GET", "$_POST", "$_REQUEST", "$_COOKIE"]
-ESCAPE_FUNCS = ["htmlspecialchars", "htmlentities"]
-
-def run_light_taint_checks() -> List[Finding]:
-    if not CONFIG.get("enable_taint_rules", True):
-        return []
-    out: List[Finding] = []
-    files = [f for f in pr.get_files() if f.filename.endswith(".php")]
-    for f in files:
-        if path_ignored(f.filename):
-            continue
-        try:
-            content = repo.get_contents(f.filename, ref=pr.head.sha).decoded_content.decode("utf-8", errors="ignore")
-        except Exception:
-            continue
-        # Unescaped echo/print of superglobals
-        for i, l in enumerate(content.splitlines(), start=1):
-            if any(src in l for src in UNESCAPED_SOURCES) and re.search(r"\b(echo|print)\b", l) and not any(fn in l for fn in ESCAPE_FUNCS):
-                body = f"[rule:xss_unescaped_output] [severity:critical] Potential XSS: unescaped user input echoed on line no {i}; escape with htmlspecialchars()."
-                out.append(Finding(path=f.filename, line=i, body=body, severity="critical", rule="xss_unescaped_output"))
-        # Naive SQL concat/interpolation without prepare
-        uses_prepare = re.search(r"prepare\s*\(|bindParam|bindValue", content, re.IGNORECASE)
-        for i, l in enumerate(content.splitlines(), start=1):
-            if re.search(r"(SELECT|INSERT|UPDATE|DELETE)", l, re.IGNORECASE) and ("." in l or "$" in l):
-                var_present = any(src in l for src in UNESCAPED_SOURCES) or re.search(r"\$[a-zA-Z_][a-zA-Z0-9_]*", l)
-                if var_present and not uses_prepare:
-                    body = f"[rule:sql_concat_query] [severity:critical] Possible SQL injection: query built by string concatenation on line no {i}; use prepared statements."
-                    out.append(Finding(path=f.filename, line=i, body=body, severity="critical", rule="sql_concat_query"))
+        keep = False
+        for start, length in hunks_map[file]:
+            if line >= start and line < start + length:
+                keep = True
+                break
+        if keep:
+            out.append(it)
     return out
 
-# ---------------- Main ----------------
+def group_key(it):
+    sig = f'{it.get("file")}:{it.get("line")}:{it.get("rule")}:{it.get("message")}'
+    return hashlib.sha1(sig.encode()).hexdigest()
+
+def build_comment_body(items):
+    # group similar items per hunk/file
+    lines = ["Automated context-aware PHP review findings:", ""]
+    for it in items:
+        rule = it.get("rule")
+        sev = it.get("severity")
+        msg = it.get("message")
+        sig = group_key(it)
+        lines.append(f"- [{sev.upper()}] {msg}  <!-- review-bot:{sig} -->")
+    return "\n".join(lines)
+
 def main():
-    feedback_txt = "code_review/feedback.txt"
-    base_text = ""
-    if os.path.exists(feedback_txt):
-        with open(feedback_txt, "r", encoding="utf-8") as fh:
-            base_text = fh.read()
+    TOKEN = os.getenv("GITHUB_TOKEN")
+    REPO = os.getenv("GITHUB_REPOSITORY")
+    PR_NUMBER = int(os.getenv("PR_NUMBER", "0"))
+    g = Github(TOKEN)
+    repo = g.get_repo(REPO)
+    pr = repo.get_pull(PR_NUMBER)
 
-    findings = parse_feedback(base_text)
-    findings.extend(run_light_taint_checks())
+    cfg = load_config()
+    hunks = load_json(HUNKS_PATH, {})
+    labels = load_json(LABELS_PATH, [])
+    findings = load_json(FINDINGS_PATH, [])
 
-    # Filters
-    filtered: List[Finding] = []
-    for fnd in findings:
-        if fnd.path and path_ignored(fnd.path):
-            continue
-        if not rule_enabled(fnd.rule):
-            continue
-        if not min_sev_allows(fnd.severity):
-            continue
-        filtered.append(fnd)
+    # severity gate (with label override)
+    min_sev = min_severity_from_labels(labels, cfg.get("min_severity", "warning"))
+    findings = [f for f in findings if SEV_RANK.get(f.get("severity","warning"),1) >= SEV_RANK[min_sev]]
 
-    # Inline vs summary
-    inline_items = [f for f in filtered if f.path and f.line]
-    summary_items = [f for f in filtered if not (f.path and f.line)]
+    # filter to changed hunks
+    findings = filter_to_hunks(findings, hunks)
 
-    # Inline review comments (respect cap)
-    comments = []
-    cap = CONFIG.get("max_inline_comments", 30)
-    for f in inline_items[:cap]:
-        pr_file = next((pf for pf in pr.get_files() if pf.filename == f.path), None)
-        if not pr_file:
-            continue
-        position = find_position_in_diff(pr_file.patch or "", f.line)
-        if position is None:
-            continue
-        comments.append({"path": f.path, "position": position, "body": f.body})
+    # de-duplicate by signature
+    seen = set()
+    uniq = []
+    for f in findings:
+        sig = group_key(f)
+        if sig not in seen:
+            seen.add(sig)
+            uniq.append(f)
 
-    if comments:
-        pr.create_review(body="Automated PHP Code Review Feedback", comments=comments)
+    # Respect comment cap
+    cap = int(cfg.get("comment_cap", 30))
+    uniq = uniq[:cap]
 
-    # Summary for non-line findings
-    if summary_items:
-        by_file: Dict[str, List[Finding]] = {}
-        for f in summary_items:
-            key = f.path or "General"
-            by_file.setdefault(key, []).append(f)
-        lines = ["**Other code review suggesions:**\n"]
-        for path, items in by_file.items():
-            lines.append(f"- **{path}**")
-            for it in items:
-                sev = it.severity.upper()
-                lines.append(f"  - [{sev}] {it.body}")
-        pr.create_issue_comment("\n".join(lines))
+    # Post or update: if an identical signature exists, skip
+    existing = list(pr.get_issue_comments())
+    existing_sigs = set()
+    for c in existing:
+        if "<!-- review-bot:" in c.body:
+            # collect all sigs inside
+            for part in c.body.split("<!-- review-bot:")[1:]:
+                sig = part.split("-->")[0].strip()
+                existing_sigs.add(sig)
 
-    if not comments and not summary_items:
-        pr.create_issue_comment("No issues found. Nice implementation!")
+    new_items = [f for f in uniq if group_key(f) not in existing_sigs]
+
+    if not new_items:
+        pr.create_issue_comment("✅ No new context-aware findings for the latest changes. <!-- review-bot:summary -->")
+        return
+
+    body = build_comment_body(new_items)
+    pr.create_issue_comment(body)
+
+    # Optional: write SARIF for upload
+    runs = []
+    for it in new_items:
+        rule = it.get("rule")
+        sev = it.get("severity", "warning")
+        message = it.get("message")
+        file = it.get("file")
+        line = int(it.get("line", 1))
+        level = "warning" if sev != "critical" else "error"
+        runs.append({
+            "ruleId": rule,
+            "level": level,
+            "message": {"text": message},
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": {"uri": file},
+                    "region": {"startLine": line}
+                }
+            }]
+        })
+    sarif = {
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "context-php-review", "rules": []}},
+            "results": runs
+        }]
+    }
+    with open("code_review/findings.sarif", "w") as f:
+        json.dump(sarif, f, indent=2)
 
 if __name__ == "__main__":
     main()
