@@ -72,6 +72,49 @@ for line in lines:
             'body': line
         })
 
+# -------------------------------------------------------------
+# Parse PHPMD output and add inline comments for changed files
+# -------------------------------------------------------------
+# PHPMD produces lines like:
+# /abs/path/to/File.php:20 RuleName Message text
+phpmd_path = "code_review/phpmd_output.txt"
+if os.path.exists(phpmd_path):
+    with open(phpmd_path, "r") as f:
+        for md_line in f:
+            md_line = md_line.strip()
+            if not md_line:
+                continue
+            # Skip lines that are not PHPMD result lines (e.g., header or no changed files message)
+            # Expect format: absolute_path:line_no RuleName message
+            m = re.match(r"(.+\.php):(\d+)\s+(\w+)\s+(.*)", md_line)
+            if not m:
+                continue
+            abs_path, line_str, rule_name, message = m.groups()
+            line_no = int(line_str)
+            # Determine relative path by matching the suffix of abs_path with PR files
+            pr_file = next((f for f in pr.get_files() if abs_path.endswith(f.filename)), None)
+            if not pr_file:
+                continue
+            # Skip if the file is not among the changed files
+            if not os.path.exists("code_review/changed_files.txt"):
+                changed_set = set()
+            else:
+                with open("code_review/changed_files.txt", "r") as cf:
+                    changed_set = set([l.strip() for l in cf if l.strip()])
+            if pr_file.filename not in changed_set:
+                continue
+            # Find position in diff
+            position = find_position_in_diff(pr_file.patch or "", line_no)
+            if position is None:
+                continue
+            # Compose a body message indicating PHPMD rule and message
+            body = f"PHPMD: {rule_name} - {message}"
+            review_comments.append({
+                'path': pr_file.filename,
+                'position': position,
+                'body': body
+            })
+
 # Post inline comments if there are any
 if review_comments:
     pr.create_review(body="Automated PHP Code Review Feedback", comments=review_comments)
