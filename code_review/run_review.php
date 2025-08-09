@@ -116,16 +116,15 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             }
         }
 
-        // Naming conventions for private/protected properties (underscore prefix)
+        // Naming conventions for private/protected properties
         if ($node instanceof Node\Stmt\Property) {
-            if ($node->isPrivate() || $node->isProtected()) {
-                foreach ($node->props as $prop) {
-                    $propName = $prop->name->toString();
-                    if (strlen($propName) > 0 && $propName[0] !== '_') {
-                        $line = $node->getLine();
-                        $this->warnings[] = "Property '{$propName}' should start with an underscore found on line no {$line}; prefix private/protected properties with '_'";
-                    }
-                }
+            foreach ($node->props as $prop) {
+                $propName = $prop->name->toString();
+
+                if (!preg_match('/^[a-z][a-zA-Z0-9]*$/', $propName)) {
+                    $line = $node->getLine();
+                    $this->warnings[] = "Property '{$name}' does not follow camelCase naming convention found on line no {$line}; rename it using lowerCamelCase";
+                } 
             }
         }
 

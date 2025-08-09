@@ -48,7 +48,7 @@ INFER_RULE_MAP = [
     ("verb_function", re.compile(r"Function '.*' should start with a verb", re.I)),
     ("long_function", re.compile(r"too long \(\d+ lines\)", re.I)),
     ("studly_class", re.compile(r"does not follow StudlyCaps", re.I)),
-    ("underscore_private_prop", re.compile(r"Property '.*' should start with an underscore", re.I)),
+    ("underscore_private_prop", re.compile(r"Property '.*' does not follow camelCase", re.I)),
     ("superglobal_use", re.compile(r"Use of superglobal", re.I)),
     ("nested_loop", re.compile(r"Nested loop", re.I)),
     ("magic_number", re.compile(r"Magic number", re.I)),
