@@ -26,30 +26,31 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             $funcName = $node->name->toString();
             if ($funcName === 'eval') {
                 $line = $node->getLine();
-                $this->warnings[] = "Use of 'eval()' found on line no {$line}";
+                // Suggest avoiding eval
+                $this->warnings[] = "Use of 'eval()' found on line no {$line}; avoid eval and use a safer alternative (e.g., call_user_func or proper function calls)";
             }
             // Detect var_dump() and print_r() used for debugging
             if (in_array($funcName, ['var_dump', 'print_r'])) {
                 $line = $node->getLine();
-                $this->warnings[] = "Use of '{$funcName}()' found on line no {$line}";
+                $this->warnings[] = "Use of '{$funcName}()' found on line no {$line}; remove debug statements or use a proper logging mechanism";
             }
             // Detect deprecated mysql_* functions
             if (preg_match('/^mysql_/', $funcName)) {
                 $line = $node->getLine();
-                $this->warnings[] = "Use of '{$funcName}()' found on line no {$line}";
+                $this->warnings[] = "Use of '{$funcName}()' found on line no {$line}; these functions are deprecated, use PDO or MySQLi instead";
             }
         }
 
         // Detect exit/die statements
         if ($node instanceof Node\Expr\Exit_) {
             $line = $node->getLine();
-            $this->warnings[] = "Use of 'exit or die' found on line no {$line}";
+            $this->warnings[] = "Use of 'exit or die' found on line no {$line}; throw an exception or return instead of abruptly terminating the script";
         }
 
         // Detect goto statements
         if ($node instanceof Node\Stmt\Goto_) {
             $line = $node->getLine();
-            $this->warnings[] = "Use of 'goto' found on line no {$line}";
+            $this->warnings[] = "Use of 'goto' found on line no {$line}; restructure the control flow to avoid goto";
         }
 
         // Naming conventions for functions (camelCase and verb prefix)
@@ -58,19 +59,19 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             // function names should be lowerCamelCase without underscores
             if (!preg_match('/^[a-z][a-zA-Z0-9]*$/', $name)) {
                 $line = $node->getLine();
-                $this->warnings[] = "Function '{$name}' does not follow camelCase naming convention found on line no {$line}";
+                $this->warnings[] = "Function '{$name}' does not follow camelCase naming convention found on line no {$line}; rename it using lowerCamelCase";
             } else {
                 // check verb prefix (get, set, list, delete, connect, prepare)
                 if (!preg_match('/^(get|set|list|delete|connect|prepare)/', $name)) {
                     $line = $node->getLine();
-                    $this->warnings[] = "Function '{$name}' should start with a verb (get/set/list/delete/connect/prepare) found on line no {$line}";
+                    $this->warnings[] = "Function '{$name}' should start with a verb (get/set/list/delete/connect/prepare) found on line no {$line}; pick a more descriptive verb-based name";
                 }
             }
             // long function detection (>50 lines)
             $length = $node->getEndLine() - $node->getStartLine();
             if ($length > 50) {
                 $line = $node->getLine();
-                $this->warnings[] = "Function '{$name}' is too long ({$length} lines) found on line no {$line}";
+                $this->warnings[] = "Function '{$name}' is too long ({$length} lines) found on line no {$line}; consider splitting it into smaller functions";
             }
         }
 
@@ -81,7 +82,20 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
                 // Class names should start with uppercase and contain no underscores
                 if (!preg_match('/^[A-Z][A-Za-z0-9]*$/', $cls)) {
                     $line = $node->getLine();
-                    $this->warnings[] = "Class '{$cls}' does not follow StudlyCaps naming convention found on line no {$line}";
+                    $this->warnings[] = "Class '{$cls}' does not follow StudlyCaps naming convention found on line no {$line}; rename the class using StudlyCaps";
+                }
+            }
+        }
+
+        // Naming conventions for private/protected properties (underscore prefix)
+        if ($node instanceof Node\Stmt\Property) {
+            if ($node->isPrivate() || $node->isProtected()) {
+                foreach ($node->props as $prop) {
+                    $propName = $prop->name->toString();
+                    if (strlen($propName) > 0 && $propName[0] !== '_') {
+                        $line = $node->getLine();
+                        $this->warnings[] = "Property '{$propName}' should start with an underscore found on line no {$line}; prefix private/protected properties with '_'";
+                    }
                 }
             }
         }
@@ -92,7 +106,7 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             $superglobals = ['_GET', '_POST', '_REQUEST', '_SERVER', '_COOKIE', '_FILES', '_ENV', '_SESSION'];
             if (in_array($varName, $superglobals)) {
                 $line = $node->getLine();
-                $this->warnings[] = "Use of superglobal '${$varName}' found on line no {$line}";
+                $this->warnings[] = "Use of superglobal '${$varName}' found on line no {$line}; use a request abstraction or sanitised input";
             }
         }
 
@@ -101,7 +115,7 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             $this->loopDepth++;
             if ($this->loopDepth > 1) {
                 $line = $node->getLine();
-                $this->warnings[] = "Nested loop found on line no {$line}";
+                $this->warnings[] = "Nested loop found on line no {$line}; refactor to reduce complexity (e.g., extract inner loop into a separate function)";
             }
         }
 
@@ -110,7 +124,30 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             $value = $node->value;
             if ($value !== 0 && $value !== 1) {
                 $line = $node->getLine();
-                $this->warnings[] = "Magic number '{$value}' found on line no {$line}";
+                $this->warnings[] = "Magic number '{$value}' found on line no {$line}; replace it with a named constant";
+            }
+        }
+
+        // Detect hard-coded values in assignments
+        if ($node instanceof Node\Expr\Assign) {
+            $valueNode = $node->expr;
+            // Check for string or numeric literal assignment
+            if ($valueNode instanceof Node\Scalar\String_ || $valueNode instanceof Node\Scalar\LNumber || $valueNode instanceof Node\Scalar\DNumber) {
+                // Skip small numeric literals (0 or 1) as these may be used legitimately
+                if (!($valueNode instanceof Node\Scalar\LNumber && ($valueNode->value === 0 || $valueNode->value === 1))) {
+                    $line = $valueNode->getLine();
+                    // Truncate long strings for readability
+                    $value = $valueNode->value;
+                    if (is_string($value)) {
+                        $display = substr($value, 0, 30);
+                        if (strlen($value) > 30) {
+                            $display .= '...';
+                        }
+                    } else {
+                        $display = $value;
+                    }
+                    $this->warnings[] = "Hard-coded value '{$display}' assigned on line no {$line}; move this value into a configuration constant or environment variable";
+                }
             }
         }
 
@@ -120,7 +157,7 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
                 $constName = $const->name->toString();
                 if (!preg_match('/^[A-Z][A-Z0-9_]*$/', $constName)) {
                     $line = $const->getLine();
-                    $this->warnings[] = "Class constant '{$constName}' should be in ALL_CAPS with underscores found on line no {$line}";
+                    $this->warnings[] = "Class constant '{$constName}' should be in ALL_CAPS with underscores found on line no {$line}; rename the constant accordingly";
                 }
             }
         }
@@ -134,7 +171,7 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             if (!in_array($varName, $superglobals) && !in_array($varName, $loopIndices)) {
                 if (strlen($varName) > 1 && !preg_match('/^[a-z][a-zA-Z0-9]*$/', $varName)) {
                     $line = $node->getLine();
-                    $this->warnings[] = "Variable '${$varName}' does not follow lowerCamelCase naming convention found on line no {$line}";
+                    $this->warnings[] = "Variable '${$varName}' does not follow lowerCamelCase naming convention found on line no {$line}; rename the variable using lowerCamelCase with descriptive words";
                 }
             }
         }
@@ -149,7 +186,7 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
                     $doc = $node->getDocComment();
                     if ($doc === null) {
                         $line = $node->getLine();
-                        $this->warnings[] = "Public method '{$methodName}' is missing PHPDoc comment found on line no {$line}";
+                        $this->warnings[] = "Public method '{$methodName}' is missing PHPDoc comment found on line no {$line}; add a PHPDoc block describing parameters and return types";
                     }
                 }
             }
@@ -158,20 +195,89 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
         // Detect global statements
         if ($node instanceof Node\Stmt\Global_) {
             $line = $node->getLine();
-            $this->warnings[] = "Use of 'global' found on line no {$line}";
+            $this->warnings[] = "Use of 'global' found on line no {$line}; avoid global variables by passing dependencies explicitly";
         }
 
         // Detect error suppression operator
         if ($node instanceof Node\Expr\ErrorSuppress) {
             $line = $node->getLine();
-            $this->warnings[] = "Use of '@' operator found on line no {$line}";
+            $this->warnings[] = "Use of '@' operator found on line no {$line}; do not suppress errors with @, handle them properly";
         }
 
         // Detect empty catch blocks
         if ($node instanceof Node\Stmt\Catch_) {
-            if (empty($node->stmts)) {
+            if ($this->isEmptyBlock($node->stmts)) {
                 $line = $node->getLine();
-                $this->warnings[] = "Empty catch block found on line no {$line}";
+                $this->warnings[] = "Empty catch block found on line no {$line}; handle exceptions or at least log them";
+            }
+        }
+
+        // Empty finally
+        if ($node instanceof Node\Stmt\Finally_) {
+            if ($this->isEmptyBlock($node->stmts)) {
+                $this->warnings[] = "Empty finally block (line {$node->getLine()}); add cleanup or remove.";
+            }
+        }
+
+        // Empty if / elseif / else
+        if ($node instanceof Node\Stmt\If_) {
+            if ($this->isEmptyBlock($node->stmts)) {
+                $this->warnings[] = "Empty if block (line {$node->getLine()}); implement logic or remove.";
+            }
+            foreach ($node->elseifs as $elseif) {
+                if ($this->isEmptyBlock($elseif->stmts)) {
+                    $this->warnings[] = "Empty elseif block (line {$elseif->getLine()}); implement logic or remove.";
+                }
+            }
+            if ($node->else && $this->isEmptyBlock($node->else->stmts)) {
+                $this->warnings[] = "Empty else block (line {$node->else->getLine()}); implement logic or remove.";
+            }
+        }
+
+        // Empty foreach / for / while / do-while
+        if ($node instanceof Node\Stmt\Foreach_) {
+            if ($this->isEmptyBlock($node->stmts)) {
+                $this->warnings[] = "Empty foreach body (line {$node->getLine()}); implement logic or remove.";
+            }
+        }
+        if ($node instanceof Node\Stmt\For_) {
+            if ($this->isEmptyBlock($node->stmts)) {
+                $this->warnings[] = "Empty for loop body (line {$node->getLine()}); implement logic or remove.";
+            }
+        }
+        if ($node instanceof Node\Stmt\While_) {
+            if ($this->isEmptyBlock($node->stmts)) {
+                $this->warnings[] = "Empty while loop body (line {$node->getLine()}); implement logic or remove.";
+            }
+        }
+        if ($node instanceof Node\Stmt\Do_) {
+            if ($this->isEmptyBlock($node->stmts)) {
+                $this->warnings[] = "Empty do-while loop body (line {$node->getLine()}); implement logic or remove.";
+            }
+        }
+
+        // Empty switch cases
+        if ($node instanceof Node\Stmt\Switch_) {
+            foreach ($node->cases as $case) {
+                if ($this->isEmptyBlock($case->stmts)) {
+                    $label = $case->cond ? 'case' : 'default';
+                    $this->warnings[] = "Empty {$label} block in switch (line {$case->getLine()}); implement logic or remove.";
+                }
+            }
+        }
+
+        // Empty functions and methods (skip abstract/interface)
+        if ($node instanceof Node\Stmt\Function_) {
+            if ($this->isEmptyBlock($node->stmts)) {
+                $name = $node->name->toString();
+                $this->warnings[] = "Empty function '{$name}' (line {$node->getLine()}); add implementation or remove.";
+            }
+        }
+        if ($node instanceof Node\Stmt\ClassMethod) {
+            // $node->stmts === null for abstract/interface; skip those
+            if (!$node->isAbstract() && is_array($node->stmts) && $this->isEmptyBlock($node->stmts)) {
+                $name = $node->name->toString();
+                $this->warnings[] = "Empty method '{$name}' (line {$node->getLine()}); add implementation or remove.";
             }
         }
     }
@@ -191,6 +297,19 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
     public function getWarnings() {
         return $this->warnings;
     }
+    
+    private function isEmptyBlock(?array $stmts): bool
+    {
+        if (!$stmts || count($stmts) === 0) {
+            return true;
+        }
+        foreach ($stmts as $s) {
+            if (!($s instanceof PhpParser\Node\Stmt\Nop)) {
+                return false;
+            }
+        }
+        return true; // only Nops/comments
+    }
 }
 
 $parser = (new ParserFactory)->create(ParserFactory::PREFER_PHP7);
@@ -205,14 +324,14 @@ foreach ($changedFiles as $file) {
     // Detect short open tags (<? instead of <?php)
     if (strpos($code, '<?php') === false && strpos($code, '<?') !== false) {
         $issues[] = "\nFile: $file";
-        $issues[] = "Short PHP opening tag detected; use <?php instead";
+        $issues[] = "Short PHP opening tag detected; use <?php instead to ensure portability";
     }
     // Detect closing PHP tag in pure PHP files
     if (preg_match('/\?>\s*$/', $code)) {
         $issues[] = "\nFile: $file";
-        $issues[] = "Closing ?> tag detected; omit the closing tag in pure PHP files";
+        $issues[] = "Closing ?> tag detected; omit the closing tag in pure PHP files to prevent unintended output";
     }
-
+    
     try {
         $ast = $parser->parse($code);
     } catch (Error $e) {
@@ -221,7 +340,6 @@ foreach ($changedFiles as $file) {
         $issues[] = "Parse error: " . $e->getMessage();
         continue;
     }
-
     // Detect single purpose per file and multiple classes
     $hasDeclaration = false;
     $hasSideEffect = false;
@@ -238,7 +356,7 @@ foreach ($changedFiles as $file) {
     }
     if ($hasDeclaration && $hasSideEffect) {
         $issues[] = "\nFile: $file";
-        $issues[] = "File contains both declarations and executable code; separate classes/functions from side effects";
+        $issues[] = "File contains both declarations and executable code; separate classes and functions into their own files without side effects";
     }
     if ($classCount > 1) {
         $issues[] = "\nFile: $file";
@@ -248,7 +366,7 @@ foreach ($changedFiles as $file) {
     // Detect missing strict_types declaration for files containing declarations
     if ($hasDeclaration && strpos($code, 'declare(strict_types=1)') === false) {
         $issues[] = "\nFile: $file";
-        $issues[] = "Missing declare(strict_types=1); at the top of file with class or function definitions";
+        $issues[] = "Missing declare(strict_types=1); add \"declare(strict_types=1);\" at the top of files defining classes or functions";
     }
 
 
