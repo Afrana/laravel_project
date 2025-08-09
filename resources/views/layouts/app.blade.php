@@ -15,6 +15,19 @@
 
         <!-- Scripts -->
         <script src="{{ asset('js/app.js') }}" defer></script>
+        <?php
+        
+        function testFunction(){
+            // eval usage
+            eval('$x = 1;');
+
+            // superglobal usage and error suppression
+            if ($_GET['id']) {
+                $content = @file_get_contents("somefile.txt");
+            }
+        } 
+        
+        ?>
     </head>
     <body class="font-sans antialiased">
         <div class="min-h-screen bg-gray-100">
@@ -34,3 +47,4 @@
         </div>
     </body>
 </html>
+
