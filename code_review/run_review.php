@@ -86,19 +86,6 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             }
         }
 
-        // Naming conventions for private/protected properties (underscore prefix)
-        if ($node instanceof Node\Stmt\Property) {
-            if ($node->isPrivate() || $node->isProtected()) {
-                foreach ($node->props as $prop) {
-                    $propName = $prop->name->toString();
-                    if (strlen($propName) > 0 && $propName[0] !== '_') {
-                        $line = $node->getLine();
-                        $this->warnings[] = "Property '{$propName}' should start with an underscore found on line no {$line}";
-                    }
-                }
-            }
-        }
-
         // Detect use of superglobals
         if ($node instanceof Node\Expr\Variable && is_string($node->name)) {
             $varName = $node->name;
@@ -124,6 +111,47 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             if ($value !== 0 && $value !== 1) {
                 $line = $node->getLine();
                 $this->warnings[] = "Magic number '{$value}' found on line no {$line}";
+            }
+        }
+
+        // Detect class constant naming (should be ALL_CAPS with underscores)
+        if ($node instanceof Node\Stmt\ClassConst) {
+            foreach ($node->consts as $const) {
+                $constName = $const->name->toString();
+                if (!preg_match('/^[A-Z][A-Z0-9_]*$/', $constName)) {
+                    $line = $const->getLine();
+                    $this->warnings[] = "Class constant '{$constName}' should be in ALL_CAPS with underscores found on line no {$line}";
+                }
+            }
+        }
+
+        // Detect variable naming (lowerCamelCase for descriptive variables)
+        if ($node instanceof Node\Expr\Variable && is_string($node->name)) {
+            $varName = $node->name;
+            // Skip superglobals (handled elsewhere) and common loop indices (i, j, k)
+            $superglobals = ['_GET', '_POST', '_REQUEST', '_SERVER', '_COOKIE', '_FILES', '_ENV', '_SESSION'];
+            $loopIndices = ['i', 'j', 'k', 'n', 'm'];
+            if (!in_array($varName, $superglobals) && !in_array($varName, $loopIndices)) {
+                if (strlen($varName) > 1 && !preg_match('/^[a-z][a-zA-Z0-9]*$/', $varName)) {
+                    $line = $node->getLine();
+                    $this->warnings[] = "Variable '${$varName}' does not follow lowerCamelCase naming convention found on line no {$line}";
+                }
+            }
+        }
+
+        // Detect missing PHPDoc on public methods
+        if ($node instanceof Node\Stmt\ClassMethod) {
+            // Only check methods that are explicitly public (or default public) and not magic methods
+            $methodName = $node->name->toString();
+            if (!$node->isPrivate() && !$node->isProtected()) {
+                // Skip constructors/destructors and magic methods like __invoke
+                if (!preg_match('/^__/', $methodName)) {
+                    $doc = $node->getDocComment();
+                    if ($doc === null) {
+                        $line = $node->getLine();
+                        $this->warnings[] = "Public method '{$methodName}' is missing PHPDoc comment found on line no {$line}";
+                    }
+                }
             }
         }
 
@@ -174,6 +202,17 @@ foreach ($changedFiles as $file) {
     if (!str_ends_with($file, '.php')) continue;
 
     $code = file_get_contents($file);
+    // Detect short open tags (<? instead of <?php)
+    if (strpos($code, '<?php') === false && strpos($code, '<?') !== false) {
+        $issues[] = "\nFile: $file";
+        $issues[] = "Short PHP opening tag detected; use <?php instead";
+    }
+    // Detect closing PHP tag in pure PHP files
+    if (preg_match('/\?>\s*$/', $code)) {
+        $issues[] = "\nFile: $file";
+        $issues[] = "Closing ?> tag detected; omit the closing tag in pure PHP files";
+    }
+
     try {
         $ast = $parser->parse($code);
     } catch (Error $e) {
@@ -181,6 +220,35 @@ foreach ($changedFiles as $file) {
         $issues[] = "\nFile: $file";
         $issues[] = "Parse error: " . $e->getMessage();
         continue;
+    }
+
+    // Detect single purpose per file and multiple classes
+    $hasDeclaration = false;
+    $hasSideEffect = false;
+    $classCount = 0;
+    foreach ($ast as $stmt) {
+        if ($stmt instanceof Node\Stmt\Class_ || $stmt instanceof Node\Stmt\Interface_ || $stmt instanceof Node\Stmt\Function_) {
+            $hasDeclaration = true;
+            if ($stmt instanceof Node\Stmt\Class_) {
+                $classCount++;
+            }
+        } elseif ($stmt instanceof Node\Stmt\Expression || $stmt instanceof Node\Stmt\Echo_ || $stmt instanceof Node\Stmt\Return_ || $stmt instanceof Node\Stmt\InlineHTML) {
+            $hasSideEffect = true;
+        }
+    }
+    if ($hasDeclaration && $hasSideEffect) {
+        $issues[] = "\nFile: $file";
+        $issues[] = "File contains both declarations and executable code; separate classes/functions from side effects";
+    }
+    if ($classCount > 1) {
+        $issues[] = "\nFile: $file";
+        $issues[] = "File contains multiple classes; follow one-class-per-file convention";
+    }
+
+    // Detect missing strict_types declaration for files containing declarations
+    if ($hasDeclaration && strpos($code, 'declare(strict_types=1)') === false) {
+        $issues[] = "\nFile: $file";
+        $issues[] = "Missing declare(strict_types=1); at the top of file with class or function definitions";
     }
 
 
