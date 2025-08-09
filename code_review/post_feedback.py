@@ -238,7 +238,7 @@ def main():
 
     # Inline vs summary
     inline_items = [f for f in filtered if f.path and f.line]
-    summary_items = [f for f in filtered if not (f.path and f.line)]
+    summary_items = [f for f in filtered if not (f.path or f.line)]
 
     # Inline review comments (respect cap)
     comments = []
