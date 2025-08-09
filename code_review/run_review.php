@@ -136,8 +136,7 @@ class CodeReviewVisitor extends NodeVisitorAbstract {
             $value = $node->value;
             if ($value !== 0 && $value !== 1) {
                 $line = $node->getLine();
-                $this->warnings[] = "Magic number '{$value}' found on line no {$line}; 
-                    replace it with a named constant";
+                $this->warnings[] = "Magic number '{$value}' found on line no {$line}; replace it with a named constant";
             }
         }
 
