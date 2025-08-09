@@ -1,5 +1,5 @@
 {
-  "min_severity": "warning",
+  "min_severity": "info",
   "max_inline_comments": 25,
   "paths": {
     "ignore": [

@@ -6,65 +6,29 @@ import fnmatch
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 
-# ---------------- Config schema ----------------
-DEFAULT_CONFIG = {
-    "min_severity": "info",             # info | warning | critical
-    "max_inline_comments": 30,
-    "paths": {
-        "ignore": ["vendor/**", "storage/**", "tests/**", "**/.history/**"],
-        "only": []                         # restrict analysis to these patterns if non-empty
-    },
-    "enable_taint_rules": True,            # lightweight extra checks in this script
-    "rules": {                             # per-rule toggles & severity overrides
-        # Example entries; if a rule is missing here, defaults apply.
-        # "eval_usage": {"enabled": True, "severity": "critical"}
-    }
-}
-
+# ---------------- Constants ----------------
 SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
+CONFIG_PATH = "code_review/.phpcodereview.json"
+
+# ---------------- Config (required) ----------------
+def load_config() -> Dict:
+    if not os.path.exists(CONFIG_PATH):
+        raise FileNotFoundError(f"Required config file not found: {CONFIG_PATH}")
+    with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+CONFIG = load_config()
 
 # ---------------- GitHub setup ----------------
-TOKEN = os.environ.get('GITHUB_TOKEN')
-REPO_NAME = os.environ.get('GITHUB_REPOSITORY')
-PR_NUMBER = int(os.environ.get('PR_NUMBER', '0'))
+TOKEN = os.environ.get("GITHUB_TOKEN")
+REPO_NAME = os.environ.get("GITHUB_REPOSITORY")
+PR_NUMBER = int(os.environ.get("PR_NUMBER", "0"))
 
 g = Github(TOKEN)
 repo = g.get_repo(REPO_NAME)
 pr = repo.get_pull(PR_NUMBER)
 
-# ---------------- Helpers ----------------
-
-def load_config() -> Dict:
-    cfg_paths = ['.phpcodereview.json', 'code_review/.phpcodereview.json']
-    for p in cfg_paths:
-        if os.path.exists(p):
-            try:
-                with open(p, 'r', encoding='utf-8') as fh:
-                    cfg = json.load(fh)
-                merged = DEFAULT_CONFIG.copy()
-                # deep merge for nested keys
-                merged['paths'] = {**DEFAULT_CONFIG['paths'], **cfg.get('paths', {})}
-                merged['rules'] = {**DEFAULT_CONFIG.get('rules', {}), **cfg.get('rules', {})}
-                for k,v in cfg.items():
-                    if k not in ('paths','rules'):
-                        merged[k] = v
-                return merged
-            except Exception:
-                break
-    return DEFAULT_CONFIG
-
-CONFIG = load_config()
-
-def path_ignored(path: str) -> bool:
-    only = CONFIG.get('paths', {}).get('only', [])
-    if only:
-        if not any(fnmatch.fnmatch(path, pat) for pat in only):
-            return True
-    for pat in CONFIG.get('paths', {}).get('ignore', []):
-        if fnmatch.fnmatch(path, pat):
-            return True
-    return False
-
+# ---------------- Data model ----------------
 @dataclass
 class Finding:
     path: str
@@ -73,7 +37,7 @@ class Finding:
     severity: str = "warning"
     rule: Optional[str] = None
 
-# Map message text to a stable rule id when not explicitly tagged
+# ---------------- Rule inference (fallbacks) ----------------
 INFER_RULE_MAP = [
     ("eval_usage", re.compile(r"\beval\(\)", re.I)),
     ("debug_call", re.compile(r"\b(var_dump|print_r)\s*\(", re.I)),
@@ -112,9 +76,40 @@ INFER_RULE_MAP = [
     ("closing_tag", re.compile(r"Closing \?>.*pure PHP files", re.I)),
 ]
 
+EXPLICIT_RULE_RX = re.compile(r"\[rule:([a-z0-9_.:-]+)\]", re.I)
+EXPLICIT_SEV_RX = re.compile(r"\[severity:(critical|warning|info)\]", re.I)
+
+# ---------------- Helpers ----------------
+def path_ignored(path: str) -> bool:
+    only = CONFIG.get("paths", {}).get("only", [])
+    if only and not any(fnmatch.fnmatch(path, pat) for pat in only):
+        return True
+    for pat in CONFIG.get("paths", {}).get("ignore", []):
+        if fnmatch.fnmatch(path, pat):
+            return True
+    return False
+
+def min_sev_allows(sev: str) -> bool:
+    want = CONFIG.get("min_severity", "info").lower()
+    return SEVERITY_ORDER.get(sev, 1) >= SEVERITY_ORDER.get(want, 1)
+
+def rule_enabled(rule: Optional[str]) -> bool:
+    if rule is None:
+        return True
+    cfg = CONFIG.get("rules", {}).get(rule)
+    if cfg is None:
+        return True  # unspecified = enabled
+    return cfg.get("enabled", True)
+
+def rule_severity_override(rule: Optional[str]) -> Optional[str]:
+    if rule and rule in CONFIG.get("rules", {}):
+        sev = CONFIG["rules"][rule].get("severity")
+        if sev in SEVERITY_ORDER:
+            return sev
+    return None
+
 def infer_rule(msg: str) -> Optional[str]:
-    # explicit tag wins: [rule:my_rule_id]
-    m = re.search(r"\[rule:([a-z0-9_\.:-]+)\]", msg, re.I)
+    m = EXPLICIT_RULE_RX.search(msg)
     if m:
         return m.group(1).lower()
     for rid, rx in INFER_RULE_MAP:
@@ -123,16 +118,12 @@ def infer_rule(msg: str) -> Optional[str]:
     return None
 
 def infer_severity(msg: str, rule: Optional[str]) -> str:
-    # explicit tag: [severity:critical|warning|info]
-    m = re.search(r"\[severity:(critical|warning|info)\]", msg, re.I)
+    m = EXPLICIT_SEV_RX.search(msg)
     if m:
         return m.group(1).lower()
-    # config override
-    if rule and rule in CONFIG.get("rules", {}):
-        sev = CONFIG["rules"][rule].get("severity")
-        if sev in SEVERITY_ORDER:
-            return sev
-    # heuristic fallback
+    override = rule_severity_override(rule)
+    if override:
+        return override
     low = msg.lower()
     if any(k in low for k in ["sql injection", "xss", "unescaped", "eval()", "danger", "shell_exec", "system(", "secrets", "deserializ"]):
         return "critical"
@@ -140,36 +131,24 @@ def infer_severity(msg: str, rule: Optional[str]) -> str:
         return "warning"
     return "info"
 
-def rule_enabled(rule: Optional[str]) -> bool:
-    if rule is None:
-        return True
-    cfg = CONFIG.get("rules", {}).get(rule)
-    if cfg is None:
-        return True  # default enabled if not specified
-    return cfg.get("enabled", True)
-
-def min_sev_allows(sev: str) -> bool:
-    want = CONFIG.get("min_severity", "warning").lower()
-    return SEVERITY_ORDER.get(sev, 1) >= SEVERITY_ORDER.get(want, 1)
-
 def find_position_in_diff(patch: str, target_line: int) -> Optional[int]:
     if not patch:
         return None
     position = 0
-    current_old = 0
     current_new = 0
+    current_old = 0
     for line in patch.splitlines():
         position += 1
-        if line.startswith('@@'):
+        if line.startswith("@@"):
             m = re.search(r"\+([0-9]+)", line)
             if m:
                 current_new = int(m.group(1)) - 1
             continue
-        if line.startswith('+'):
+        if line.startswith("+"):
             current_new += 1
             if current_new == target_line:
                 return position
-        elif line.startswith('-'):
+        elif line.startswith("-"):
             current_old += 1
         else:
             current_new += 1
@@ -181,87 +160,87 @@ def find_position_in_diff(patch: str, target_line: int) -> Optional[int]:
 def parse_feedback(feedback_text: str) -> List[Finding]:
     findings: List[Finding] = []
     current_file: Optional[str] = None
-    for line in feedback_text.splitlines():
-        line = line.strip()
+    for raw in feedback_text.splitlines():
+        line = raw.strip()
         if not line:
             continue
 
-        file_match = re.match(r"File:\s+(.*)$", line)
-        if file_match:
-            current_file = file_match.group(1)
+        mfile = re.match(r"File:\s+(.*)$", line)
+        if mfile:
+            current_file = mfile.group(1)
             continue
 
-        # non-file lines: treat as general/summary
         if current_file is None:
             rid = infer_rule(line)
             sev = infer_severity(line, rid)
             findings.append(Finding(path="", line=None, body=line, severity=sev, rule=rid))
             continue
 
-        # standard "line no N" parsing
-        m = re.search(r"line no\s*(\d+)", line, re.IGNORECASE)
-        line_no = int(m.group(1)) if m else None
+        mline = re.search(r"line no\s*(\d+)", line, re.I)
+        line_no = int(mline.group(1)) if mline else None
         rid = infer_rule(line)
         sev = infer_severity(line, rid)
         findings.append(Finding(path=current_file, line=line_no, body=line, severity=sev, rule=rid))
     return findings
 
-# Lightweight taint checks
+# ---------------- Lightweight taint checks (optional) ----------------
 UNESCAPED_SOURCES = ["$_GET", "$_POST", "$_REQUEST", "$_COOKIE"]
 ESCAPE_FUNCS = ["htmlspecialchars", "htmlentities"]
 
 def run_light_taint_checks() -> List[Finding]:
     if not CONFIG.get("enable_taint_rules", True):
         return []
-    results: List[Finding] = []
-    files = [f for f in pr.get_files() if f.filename.endswith('.php')]
+    out: List[Finding] = []
+    files = [f for f in pr.get_files() if f.filename.endswith(".php")]
     for f in files:
         if path_ignored(f.filename):
             continue
         try:
-            content = repo.get_contents(f.filename, ref=pr.head.sha).decoded_content.decode('utf-8', errors='ignore')
+            content = repo.get_contents(f.filename, ref=pr.head.sha).decoded_content.decode("utf-8", errors="ignore")
         except Exception:
             continue
-        # Rule: Unescaped echo/print of superglobals
-        for i, line in enumerate(content.splitlines(), start=1):
-            if any(src in line for src in UNESCAPED_SOURCES) and re.search(r"\b(echo|print)\b", line) and not any(fn in line for fn in ESCAPE_FUNCS):
-                msg = f"[rule:xss_unescaped_output] [severity:critical] Potential XSS: unescaped user input echoed on line no {i}; escape with htmlspecialchars()."
-                results.append(Finding(path=f.filename, line=i, body=msg, severity="critical", rule="xss_unescaped_output"))
-        # Rule: Naive SQL concatenation/interpolation without prepare
+        # Unescaped echo/print of superglobals
+        for i, l in enumerate(content.splitlines(), start=1):
+            if any(src in l for src in UNESCAPED_SOURCES) and re.search(r"\b(echo|print)\b", l) and not any(fn in l for fn in ESCAPE_FUNCS):
+                body = f"[rule:xss_unescaped_output] [severity:critical] Potential XSS: unescaped user input echoed on line no {i}; escape with htmlspecialchars()."
+                out.append(Finding(path=f.filename, line=i, body=body, severity="critical", rule="xss_unescaped_output"))
+        # Naive SQL concat/interpolation without prepare
         uses_prepare = re.search(r"prepare\s*\(|bindParam|bindValue", content, re.IGNORECASE)
-        for i, line in enumerate(content.splitlines(), start=1):
-            if re.search(r"(SELECT|INSERT|UPDATE|DELETE)", line, re.IGNORECASE) and ('.' in line or '$' in line):
-                if (any(src in line for src in UNESCAPED_SOURCES) or re.search(r"\$[a-zA-Z_][a-zA-Z0-9_]*", line)) and not uses_prepare:
-                    msg = f"[rule:sql_concat_query] [severity:critical] Possible SQL injection: query built by string concatenation on line no {i}; use prepared statements."
-                    results.append(Finding(path=f.filename, line=i, body=msg, severity="critical", rule="sql_concat_query"))
-    return results
+        for i, l in enumerate(content.splitlines(), start=1):
+            if re.search(r"(SELECT|INSERT|UPDATE|DELETE)", l, re.IGNORECASE) and ("." in l or "$" in l):
+                var_present = any(src in l for src in UNESCAPED_SOURCES) or re.search(r"\$[a-zA-Z_][a-zA-Z0-9_]*", l)
+                if var_present and not uses_prepare:
+                    body = f"[rule:sql_concat_query] [severity:critical] Possible SQL injection: query built by string concatenation on line no {i}; use prepared statements."
+                    out.append(Finding(path=f.filename, line=i, body=body, severity="critical", rule="sql_concat_query"))
+    return out
 
+# ---------------- Main ----------------
 def main():
-    feedback_path = 'code_review/feedback.txt'
+    feedback_txt = "code_review/feedback.txt"
     base_text = ""
-    if os.path.exists(feedback_path):
-        with open(feedback_path, 'r', encoding='utf-8') as fh:
+    if os.path.exists(feedback_txt):
+        with open(feedback_txt, "r", encoding="utf-8") as fh:
             base_text = fh.read()
 
     findings = parse_feedback(base_text)
     findings.extend(run_light_taint_checks())
 
-    # Apply per-rule enablement and severity threshold
+    # Filters
     filtered: List[Finding] = []
-    for f in findings:
-        if f.path and path_ignored(f.path):
+    for fnd in findings:
+        if fnd.path and path_ignored(fnd.path):
             continue
-        if not rule_enabled(f.rule):
+        if not rule_enabled(fnd.rule):
             continue
-        if not min_sev_allows(f.severity):
+        if not min_sev_allows(fnd.severity):
             continue
-        filtered.append(f)
+        filtered.append(fnd)
 
-    # Split inline vs summary
+    # Inline vs summary
     inline_items = [f for f in filtered if f.path and f.line]
     summary_items = [f for f in filtered if not (f.path and f.line)]
 
-    # Build inline review comments (respect cap)
+    # Inline review comments (respect cap)
     comments = []
     cap = CONFIG.get("max_inline_comments", 30)
     for f in inline_items[:cap]:
@@ -271,16 +250,12 @@ def main():
         position = find_position_in_diff(pr_file.patch or "", f.line)
         if position is None:
             continue
-        comments.append({
-            "path": f.path,
-            "position": position,
-            "body": f.body
-        })
+        comments.append({"path": f.path, "position": position, "body": f.body})
 
     if comments:
         pr.create_review(body="Automated PHP Code Review Feedback", comments=comments)
 
-    # Summarize remaining/non-line findings
+    # Summary for non-line findings
     if summary_items:
         by_file: Dict[str, List[Finding]] = {}
         for f in summary_items:
