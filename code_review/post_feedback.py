@@ -8,7 +8,7 @@ from typing import List, Optional, Dict
 
 # ---------------- Constants ----------------
 SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
-CONFIG_PATH = "code_review/.phpcodereview.json"
+CONFIG_PATH = "code_review/phpcodereview.json"
 
 # ---------------- Config (required) ----------------
 def load_config() -> Dict:

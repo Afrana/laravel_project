@@ -1,6 +1,6 @@
 {
   "min_severity": "info",
-  "max_inline_comments": 25,
+  "max_inline_comments": 30,
   "paths": {
     "ignore": [
       "vendor/**",
