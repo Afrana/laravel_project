@@ -72,9 +72,37 @@ for line in lines:
             'body': line
         })
 
+# Post inline comments if there are any
 if review_comments:
     pr.create_review(body="Automated PHP Code Review Feedback", comments=review_comments)
     print(f"Posted {len(review_comments)} inline comments.")
-else:
+
+# Always create a general comment summarising external tool outputs (PHPStan/PHPMD)
+general_sections = []
+
+# Read PHPStan output if available
+phpstan_path = "code_review/phpstan_output.txt"
+if os.path.exists(phpstan_path):
+    with open(phpstan_path, "r") as f:
+        stan_content = f.read().strip()
+        if stan_content:
+            general_sections.append("PHPStan Analysis Results:\n" + stan_content)
+
+# Read PHPMD output if available
+phpmd_path = "code_review/phpmd_output.txt"
+if os.path.exists(phpmd_path):
+    with open(phpmd_path, "r") as f:
+        md_content = f.read().strip()
+        if md_content:
+            general_sections.append("PHPMD Analysis Results:\n" + md_content)
+
+# Compose a general comment if there is any content
+if general_sections:
+    # Combine the sections with blank line separators
+    general_comment = "\n\n".join(general_sections)
+    pr.create_issue_comment(general_comment)
+    print("Posted general analysis comment.")
+elif not review_comments:
+    # If there are no inline comments and no external tool output, post a generic friendly comment
     pr.create_issue_comment("Nice implementation!")
     print("Nice implementation!")

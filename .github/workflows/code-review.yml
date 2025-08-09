@@ -29,6 +29,26 @@ jobs:
       - name: Install Python packages
         run: pip install PyGithub
 
+      # Install additional PHP static analysis tools for advanced checks
+      - name: Install PHP static analysis tools
+        run: |
+          # Install PHPStan and PHPMD using composer
+          composer require --dev phpstan/phpstan phpmd/phpmd
+
+      # Run PHPStan to perform advanced static analysis (type checking, code quality)
+      - name: Run PHPStan Analysis
+        run: |
+          # Run PHPStan against the project and write the raw output to a file. Ignore exit code to continue workflow.
+          vendor/bin/phpstan analyse --no-progress --error-format=raw > code_review/phpstan_output.txt || true
+        continue-on-error: true
+
+      # Run PHPMD to detect potential problems, unused code, complexity issues, etc.
+      - name: Run PHPMD Analysis
+        run: |
+          # Run PHPMD with commonly used rule sets and write the output to a file. Ignore exit code to continue workflow.
+          vendor/bin/phpmd . text cleancode,codesize,controversial,design,naming,unusedcode --suffixes php > code_review/phpmd_output.txt || true
+        continue-on-error: true
+
       - name: Run Context-Aware Review
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

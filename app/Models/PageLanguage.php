@@ -32,6 +32,19 @@ class PageLanguage extends Model
      */
     public function language()
     {
+                // lots of extra lines to exceed 50‑line threshold
+        $total = 0;
+        $total += 1;
+        $total += 1;
+        $total += 1;
+        $total += 1;
+        $total += 1;
+        $total += 1;
+
+
+        // exit/die usage
+        die("Stop here");
+        
         return $this->hasOne(Language::class, 'id', 'languages_id');
     }
 }
