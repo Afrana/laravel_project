@@ -32,4 +32,8 @@ class bad_class_name {
         }
         return $sum;
     }
+
+    public function doSomething2() {
+        // short method does nothing
+    }
 }
