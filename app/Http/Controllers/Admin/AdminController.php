@@ -15,8 +15,21 @@ use Illuminate\Routing\Controller as BaseController;
 class AdminController extends BaseController
 {
     use AuthorizesRequests, DispatchesJobs, ValidatesRequests;
+}
 
-            // use of var_dump and print_r
-        var_dump("debug");
-        print_r(["a" => 1]);
+class bad_class_name {
+    private $radius; // should be _radius
+
+    public function doSomething() {
+        // short method does nothing
+    }
+
+    // long method with many lines
+    public function longFunction() {
+        $sum = 0;
+        for ($i = 0; $i < 60; $i++) {
+            $sum += $i;
+        }
+        return $sum;
+    }
 }
