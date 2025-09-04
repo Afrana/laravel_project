@@ -232,7 +232,11 @@ def main():
 
         comments.append({"path": f.path, "position": position, "body": f.body})
     if comments:
-        pr.create_review(body="Automated PHP Code Review Feedback", comments=comments)
+        pr.create_review(
+            body="Automated PHP Code Review Feedback",
+            comments=comments,
+            event="COMMENT"  # publish immediately (prevents 422: pending review exists)
+        )
 
     # Summary for non-line findings
     if summary_items:
