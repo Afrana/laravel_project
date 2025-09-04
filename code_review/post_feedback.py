@@ -1,4 +1,4 @@
-from github import Github
+from github import Github, Auth
 import os
 import re
 import json
@@ -24,7 +24,7 @@ TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("GITHUB_REPOSITORY")
 PR_NUMBER = int(os.environ.get("PR_NUMBER", "0"))
 
-g = Github(TOKEN)
+g = Github(auth=Auth.Token(TOKEN))
 repo = g.get_repo(REPO_NAME)
 pr = repo.get_pull(PR_NUMBER)
 
