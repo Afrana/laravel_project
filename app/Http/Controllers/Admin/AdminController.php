@@ -15,4 +15,8 @@ use Illuminate\Routing\Controller as BaseController;
 class AdminController extends BaseController
 {
     use AuthorizesRequests, DispatchesJobs, ValidatesRequests;
+
+            // use of var_dump and print_r
+        var_dump("debug");
+        print_r(["a" => 1]);
 }
