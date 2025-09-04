@@ -176,7 +176,7 @@ def parse_feedback(feedback_text: str) -> List[Finding]:
             findings.append(Finding(path="", line=None, body=line, severity=sev, rule=rid))
             continue
 
-        mline = re.search(r"line no\s*(\d+)", line, re.I)
+        mline = re.search(r"(?:line\s*no\.?|on\s*line|line)\s*(\d+)", line, re.I)
         line_no = int(mline.group(1)) if mline else None
         rid = infer_rule(line)
         sev = infer_severity(line, rid)
@@ -214,12 +214,23 @@ def main():
     for f in inline_items[:cap]:
         pr_file = next((pf for pf in pr.get_files() if pf.filename == f.path), None)
         if not pr_file:
+            # Can't map; keep it in the summary instead of losing it
+            summary_items.append(f)
             continue
-        position = find_position_in_diff(pr_file.patch or "", f.line)
-        if position is None:
-            continue
-        comments.append({"path": f.path, "position": position, "body": f.body})
 
+        patch = getattr(pr_file, "patch", "") or ""
+        if not patch:
+            # Large files or certain cases return no patch; fall back to summary
+            summary_items.append(f)
+            continue
+
+        position = find_position_in_diff(patch, f.line)
+        if position is None:
+            # Line exists only on the removed side or couldn't map → summary
+            summary_items.append(f)
+            continue
+
+        comments.append({"path": f.path, "position": position, "body": f.body})
     if comments:
         pr.create_review(body="Automated PHP Code Review Feedback", comments=comments)
 
