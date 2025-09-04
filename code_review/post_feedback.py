@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 from github import Github, Auth
 import os
 import re
@@ -10,7 +13,7 @@ from typing import List, Optional, Dict
 SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
 CONFIG_PATH = "code_review/phpcodereview.json"
 FEEDBACK_PATH = "code_review/feedback.txt"
-MAX_BODY_LEN = 65500  # keep well under GitHub comment limits
+MAX_BODY_LEN = 65500  # leave headroom under API limits
 
 # ---------------- Config (required) ----------------
 def load_config() -> Dict:
@@ -36,11 +39,6 @@ if PR_NUMBER <= 0:
 g = Github(auth=Auth.Token(TOKEN))
 repo = g.get_repo(REPO_NAME)
 pr = repo.get_pull(PR_NUMBER)
-
-# Resolve the actor login without calling /user (App tokens can’t call it)
-def get_actor_login() -> str:
-    # In GitHub Actions this is typically "github-actions[bot]" unless you use a PAT
-    return os.environ.get("GITHUB_ACTOR") or "github-actions[bot]"
 
 # ---------------- Filters ----------------
 IGNORE_GLOBS: List[str] = CONFIG.get("paths", {}).get("ignore", []) or []
@@ -96,6 +94,7 @@ def sev_passes_threshold(sev: str) -> bool:
     return SEVERITY_ORDER[sev] >= SEVERITY_ORDER.get(MIN_SEVERITY, 0)
 
 # ---------------- Feedback parser ----------------
+# Accepts: "line no 23", "line no. 23", "on line 23", or just "line 23"
 LINE_RX = re.compile(r"(?:line\s*no\.?|on\s*line|line)\s*(\d+)", re.I)
 FILE_RX = re.compile(r"^\s*File:\s*(.+?)\s*$", re.I)
 
@@ -152,20 +151,6 @@ def find_position_in_diff(patch: str, target_line: int) -> Optional[int]:
                 return position
     return None
 
-# ---------------- Pending review cleanup ----------------
-def clear_my_pending_review(pr_obj, my_login: str):
-    """Delete any pending review owned by the current actor on this PR."""
-    try:
-        for r in pr_obj.get_reviews():
-            if getattr(r, "user", None) and r.user.login == my_login and str(r.state).upper() == "PENDING":
-                try:
-                    r.delete()
-                    print(f"[post_feedback] Deleted pending review id={r.id} user={my_login}")
-                except Exception as ex:
-                    print(f"[post_feedback] Warning: could not delete pending review id={r.id}: {ex}")
-    except Exception as ex:
-        print(f"[post_feedback] Warning: could not enumerate reviews: {ex}")
-
 # ---------------- Summary builder ----------------
 def build_summary(items: List[Finding]) -> str:
     if not items:
@@ -193,7 +178,7 @@ def main():
     selected: List[Finding] = []
     for f in findings:
         if not f.path:
-            selected.append(f)
+            selected.append(f)  # summary-worthy note
             continue
         if not path_is_included(f.path):
             continue
@@ -214,7 +199,6 @@ def main():
     comments = []
     inline_count = 0
     pr_files = list(pr.get_files())
-
     for f in inline_candidates:
         if inline_count >= MAX_INLINE:
             summary_items.append(f)
@@ -242,32 +226,25 @@ def main():
         return -SEVERITY_ORDER.get(sev, 0)
     comments.sort(key=sev_key)
 
-    me_login = get_actor_login()
-    clear_my_pending_review(pr, me_login)
-
-    try:
-        if comments:
-            pr.create_review(
-                body="Automated PHP Code Review Feedback",
-                comments=comments,
-                event="COMMENT"  # publish immediately
+    # === Post each inline as a standalone review comment (NO review object) ===
+    head_sha = pr.head.sha
+    for c in comments:
+        try:
+            pr.create_review_comment(
+                c["body"],
+                head_sha,
+                c["path"],
+                c["position"]
             )
-        if summary_items:
-            pr.create_issue_comment(build_summary(summary_items))
-    except Exception as e:
-        if "pending review" in str(e).lower():
-            clear_my_pending_review(pr, me_login)
-            if comments:
-                pr.create_review(
-                    body="Automated PHP Code Review Feedback",
-                    comments=comments,
-                    event="COMMENT"
-                )
-            if summary_items:
-                pr.create_issue_comment(build_summary(summary_items))
-        else:
-            raise
+        except Exception as ex:
+            # If any inline fails, drop it into the summary so nothing is lost
+            summary_items.append(Finding(path=c["path"], line=None, body=c["body"], severity=infer_severity(c["body"])))
 
+    # Post summary (if any)
+    if summary_items:
+        pr.create_issue_comment(build_summary(summary_items))
+
+    # If nothing at all was posted, leave a friendly note
     if not comments and not summary_items:
         pr.create_issue_comment("No issues found. Nice implementation!")
 
