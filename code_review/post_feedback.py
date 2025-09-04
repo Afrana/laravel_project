@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 from github import Github, Auth
 import os
 import re
@@ -9,6 +12,8 @@ from typing import List, Optional, Dict
 # ---------------- Constants ----------------
 SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
 CONFIG_PATH = "code_review/phpcodereview.json"
+FEEDBACK_PATH = "code_review/feedback.txt"
+MAX_BODY_LEN = 65500  # keep well under GitHub comment limits
 
 # ---------------- Config (required) ----------------
 def load_config() -> Dict:
@@ -24,234 +29,278 @@ TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("GITHUB_REPOSITORY")
 PR_NUMBER = int(os.environ.get("PR_NUMBER", "0"))
 
+if not TOKEN:
+    raise RuntimeError("GITHUB_TOKEN env var is required")
+if not REPO_NAME:
+    raise RuntimeError("GITHUB_REPOSITORY env var is required")
+if PR_NUMBER <= 0:
+    raise RuntimeError("PR_NUMBER env var must be a valid PR number")
+
 g = Github(auth=Auth.Token(TOKEN))
 repo = g.get_repo(REPO_NAME)
 pr = repo.get_pull(PR_NUMBER)
 
-# ---------------- Data model ----------------
+# ---------------- Filters ----------------
+IGNORE_GLOBS: List[str] = CONFIG.get("paths", {}).get("ignore", []) or []
+ONLY_GLOBS: List[str] = CONFIG.get("paths", {}).get("only", []) or []
+MAX_INLINE = int(CONFIG.get("max_inline_comments", 30))
+MIN_SEVERITY = CONFIG.get("min_severity", "info").lower()
+
+def path_is_included(path: str) -> bool:
+    if ONLY_GLOBS:
+        allowed = any(fnmatch.fnmatch(path, pat) for pat in ONLY_GLOBS)
+        if not allowed:
+            return False
+    if IGNORE_GLOBS:
+        if any(fnmatch.fnmatch(path, pat) for pat in IGNORE_GLOBS):
+            return False
+    return True
+
+# ---------------- Data classes ----------------
 @dataclass
 class Finding:
-    path: str
+    path: Optional[str]
     line: Optional[int]
     body: str
-    severity: str = "warning"
-    rule: Optional[str] = None
+    severity: str  # "info" | "warning" | "critical"
 
 # ---------------- Rule inference (fallbacks) ----------------
 INFER_RULE_MAP = [
-    ("eval_usage", re.compile(r"\beval\(\)", re.I)),
-    ("debug_call", re.compile(r"\b(var_dump|print_r)\s*\(", re.I)),
-    ("deprecated_mysql", re.compile(r"\bmysql_\w+\s*\(", re.I)),
-    ("exit_die", re.compile(r"\b(exit|die)\b", re.I)),
-    ("goto_usage", re.compile(r"\bgoto\b", re.I)),
-    ("camel_function", re.compile(r"Function '.*' does not follow camelCase", re.I)),
-    ("verb_function", re.compile(r"Function '.*' should start with a verb", re.I)),
-    ("long_function", re.compile(r"too long \(\d+ lines\)", re.I)),
-    ("studly_class", re.compile(r"does not follow StudlyCaps", re.I)),
-    ("underscore_private_prop", re.compile(r"Property '.*' does not follow camelCase", re.I)),
-    ("superglobal_use", re.compile(r"Use of superglobal", re.I)),
-    ("nested_loop", re.compile(r"Nested loop", re.I)),
-    ("magic_number", re.compile(r"Magic number", re.I)),
-    ("hardcoded_value", re.compile(r"Hard-?coded value", re.I)),
-    ("const_caps", re.compile(r"Class constant '.*' should be in ALL_CAPS", re.I)),
-    ("var_camel", re.compile(r"Variable '\$.*' does not follow lowerCamelCase", re.I)),
-    ("missing_phpdoc", re.compile(r"missing PHPDoc", re.I)),
-    ("global_usage", re.compile(r"Use of 'global'", re.I)),
-    ("error_suppression", re.compile(r"Use of '@' operator", re.I)),
-    ("empty_catch", re.compile(r"Empty catch block", re.I)),
-    ("empty_finally", re.compile(r"Empty finally block", re.I)),
-    ("empty_if", re.compile(r"Empty if block", re.I)),
-    ("empty_elseif", re.compile(r"Empty elseif block", re.I)),
-    ("empty_else", re.compile(r"Empty else block", re.I)),
-    ("empty_foreach", re.compile(r"Empty foreach body", re.I)),
-    ("empty_for", re.compile(r"Empty for loop body", re.I)),
-    ("empty_while", re.compile(r"Empty while loop body", re.I)),
-    ("empty_do_while", re.compile(r"Empty do-while loop body", re.I)),
-    ("empty_switch_case", re.compile(r"Empty .* block in switch", re.I)),
-    ("empty_function", re.compile(r"Empty function '", re.I)),
-    ("empty_method", re.compile(r"Empty method '", re.I)),
-    ("unused_local", re.compile(r"assigned but never used", re.I)),
-    ("unused_property", re.compile(r"never used; remove it or use it", re.I)),
-    ("short_open_tag", re.compile(r"Short open tag", re.I)),
-    ("closing_tag", re.compile(r"Closing \?>.*pure PHP files", re.I)),
+    ("eval_usage", re.compile(r"\beval\(\)", re.I), "critical"),
+    ("debug_call", re.compile(r"\b(var_dump|print_r)\s*\(", re.I), "info"),
+    ("deprecated_mysql", re.compile(r"\bmysql_\w+\s*\(", re.I), "warning"),
+    ("exit_die", re.compile(r"\b(exit|die)\b", re.I), "warning"),
+    ("goto_usage", re.compile(r"\bgoto\b", re.I), "warning"),
+    ("camel_function", re.compile(r"Function '.*' does not follow camelCase", re.I), "info"),
+    ("verb_function", re.compile(r"Function '.*' should start with a verb", re.I), "info"),
+    ("long_function", re.compile(r"too long \(\d+ lines\)", re.I), "warning"),
+    ("studly_class", re.compile(r"does not follow StudlyCaps", re.I), "info"),
+    ("underscore_private_prop", re.compile(r"Property '.*' does not follow camelCase", re.I), "info"),
+    ("superglobal_use", re.compile(r"Use of superglobal", re.I), "info"),
+    ("nested_loop", re.compile(r"Nested loop", re.I), "warning"),
+    ("magic_number", re.compile(r"Magic number", re.I), "info"),
 ]
 
-EXPLICIT_RULE_RX = re.compile(r"\[rule:([a-z0-9_.:-]+)\]", re.I)
-EXPLICIT_SEV_RX = re.compile(r"\[severity:(critical|warning|info)\]", re.I)
-
-# ---------------- Helpers ----------------
-def path_ignored(path: str) -> bool:
-    only = CONFIG.get("paths", {}).get("only", [])
-    if only and not any(fnmatch.fnmatch(path, pat) for pat in only):
-        return True
-    for pat in CONFIG.get("paths", {}).get("ignore", []):
-        if fnmatch.fnmatch(path, pat):
-            return True
-    return False
-
-def min_sev_allows(sev: str) -> bool:
-    want = CONFIG.get("min_severity", "info").lower()
-    return SEVERITY_ORDER.get(sev, 1) >= SEVERITY_ORDER.get(want, 1)
-
-def rule_enabled(rule: Optional[str]) -> bool:
-    if rule is None:
-        return True
-    cfg = CONFIG.get("rules", {}).get(rule)
-    if cfg is None:
-        return True  # unspecified = enabled
-    return cfg.get("enabled", True)
-
-def rule_severity_override(rule: Optional[str]) -> Optional[str]:
-    if rule and rule in CONFIG.get("rules", {}):
-        sev = CONFIG["rules"][rule].get("severity")
-        if sev in SEVERITY_ORDER:
+def infer_severity(text: str) -> str:
+    # explicit tag like [CRITICAL], [WARNING], [INFO]
+    m = re.search(r"\[(critical|warning|info)\]", text, re.I)
+    if m:
+        return m.group(1).lower()
+    # try to infer from known patterns
+    for _, pat, sev in INFER_RULE_MAP:
+        if pat.search(text):
             return sev
-    return None
+    return "warning"
 
-def infer_rule(msg: str) -> Optional[str]:
-    m = EXPLICIT_RULE_RX.search(msg)
-    if m:
-        return m.group(1).lower()
-    for rid, rx in INFER_RULE_MAP:
-        if rx.search(msg):
-            return rid
-    return None
+def sev_passes_threshold(sev: str) -> bool:
+    return SEVERITY_ORDER[sev] >= SEVERITY_ORDER.get(MIN_SEVERITY, 0)
 
-def infer_severity(msg: str, rule: Optional[str]) -> str:
-    m = EXPLICIT_SEV_RX.search(msg)
-    if m:
-        return m.group(1).lower()
-    override = rule_severity_override(rule)
-    if override:
-        return override
-    low = msg.lower()
-    if any(k in low for k in ["sql injection", "xss", "unescaped", "eval()", "danger", "shell_exec", "system(", "secrets", "deserializ"]):
-        return "critical"
-    if any(k in low for k in ["exit", "die", "global", "goto", "error suppression", "@ operator"]):
-        return "warning"
-    return "info"
+# ---------------- Feedback parser ----------------
+# Accepts: "line no 23", "line no. 23", "on line 23", or just "line 23"
+LINE_RX = re.compile(r"(?:line\s*no\.?|on\s*line|line)\s*(\d+)", re.I)
+FILE_RX = re.compile(r"^\s*File:\s*(.+?)\s*$", re.I)
 
-def find_position_in_diff(patch: str, target_line: int) -> Optional[int]:
-    if not patch:
-        return None
-    position = 0
-    current_new = 0
-    current_old = 0
-    for line in patch.splitlines():
-        position += 1
-        if line.startswith("@@"):
-            m = re.search(r"\+([0-9]+)", line)
-            if m:
-                current_new = int(m.group(1)) - 1
-            continue
-        if line.startswith("+"):
-            current_new += 1
-            if current_new == target_line:
-                return position
-        elif line.startswith("-"):
-            current_old += 1
-        else:
-            current_new += 1
-            current_old += 1
-            if current_new == target_line:
-                return position
-    return None
-
-def parse_feedback(feedback_text: str) -> List[Finding]:
+def parse_feedback(fp: str) -> List[Finding]:
+    if not os.path.exists(fp):
+        # If analyzer hasn't produced feedback, don't fail the run
+        print(f"[post_feedback] Feedback file not found: {fp}")
+        return []
     findings: List[Finding] = []
     current_file: Optional[str] = None
-    for raw in feedback_text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
 
-        mfile = re.match(r"File:\s+(.*)$", line)
-        if mfile:
-            current_file = mfile.group(1)
-            continue
+    with open(fp, "r", encoding="utf-8", errors="ignore") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            mfile = FILE_RX.match(line)
+            if mfile:
+                current_file = mfile.group(1).strip()
+                continue
 
-        if current_file is None:
-            rid = infer_rule(line)
-            sev = infer_severity(line, rid)
-            findings.append(Finding(path="", line=None, body=line, severity=sev, rule=rid))
-            continue
+            # capture line number (if any)
+            mline = LINE_RX.search(line)
+            line_no: Optional[int] = int(mline.group(1)) if mline else None
 
-        mline = re.search(r"(?:line\s*no\.?|on\s*line|line)\s*(\d+)", line, re.I)
-        line_no = int(mline.group(1)) if mline else None
-        rid = infer_rule(line)
-        sev = infer_severity(line, rid)
-        findings.append(Finding(path=current_file, line=line_no, body=line, severity=sev, rule=rid))
+            sev = infer_severity(line)
+            body = line
+
+            findings.append(Finding(
+                path=current_file,
+                line=line_no,
+                body=body if len(body) <= MAX_BODY_LEN else (body[:MAX_BODY_LEN] + "…"),
+                severity=sev
+            ))
     return findings
+
+# ---------------- Diff position mapping ----------------
+def find_position_in_diff(patch: str, target_line: int) -> Optional[int]:
+    """
+    Convert a right-side (new file) line number to a GitHub 'position' within the patch.
+    Returns None if the line can't be mapped (e.g., deleted-only lines).
+    """
+    if not patch:
+        return None
+
+    position = 0
+    new_line = 0
+
+    for raw_line in patch.splitlines():
+        position += 1
+        if raw_line.startswith("@@"):
+            # Hunk header: @@ -<oldStart>,<oldCount> +<newStart>,<newCount> @@
+            m = re.search(r"\+(\d+)", raw_line)
+            if m:
+                new_line = int(m.group(1)) - 1  # next '+ ' or ' ' will increment to start
+            continue
+
+        if raw_line.startswith("+"):
+            new_line += 1
+            if new_line == target_line:
+                return position
+        elif raw_line.startswith("-"):
+            # removed from old file; no increment on new_line
+            continue
+        else:
+            # context
+            new_line += 1
+            if new_line == target_line:
+                return position
+
+    return None
+
+# ---------------- Pending review cleanup ----------------
+def clear_my_pending_review(pr_obj, my_login: str):
+    """Delete any pending review owned by the current user on this PR."""
+    try:
+        for r in pr_obj.get_reviews():
+            if getattr(r, "user", None) and r.user.login == my_login and str(r.state).upper() == "PENDING":
+                try:
+                    r.delete()  # allowed for PENDING reviews
+                    print(f"[post_feedback] Deleted pending review id={r.id} user={my_login}")
+                except Exception as ex:
+                    print(f"[post_feedback] Warning: could not delete pending review id={r.id}: {ex}")
+    except Exception as ex:
+        print(f"[post_feedback] Warning: could not enumerate reviews: {ex}")
+
+# ---------------- Summary builder ----------------
+def build_summary(items: List[Finding]) -> str:
+    if not items:
+        return "No additional issues."
+    by_file: Dict[str, List[Finding]] = {}
+    for it in items:
+        key = it.path or "General"
+        by_file.setdefault(key, []).append(it)
+
+    lines: List[str] = ["**Automated PHP Code Review – Summary (unmapped lines/large diffs):**\n"]
+    for path, lst in by_file.items():
+        lines.append(f"- **{path}**")
+        for it in lst:
+            lines.append(f"  - [{it.severity.upper()}] {it.body}")
+    text = "\n".join(lines)
+    return text if len(text) <= MAX_BODY_LEN else (text[:MAX_BODY_LEN] + "…")
 
 # ---------------- Main ----------------
 def main():
-    feedback_txt = "code_review/feedback.txt"
-    base_text = ""
-    if os.path.exists(feedback_txt):
-        with open(feedback_txt, "r", encoding="utf-8") as fh:
-            base_text = fh.read()
+    findings = parse_feedback(FEEDBACK_PATH)
+    if not findings:
+        pr.create_issue_comment("No issues found. Nice implementation!")
+        return
 
-    findings = parse_feedback(base_text)
-
-    # Filters
-    filtered: List[Finding] = []
-    for fnd in findings:
-        if fnd.path and path_ignored(fnd.path):
+    # Filter by severity + path
+    selected: List[Finding] = []
+    for f in findings:
+        if not f.path:
+            # let summary carry file-less notes
+            selected.append(f)
             continue
-        if not rule_enabled(fnd.rule):
+        if not path_is_included(f.path):
             continue
-        if not min_sev_allows(fnd.severity):
+        if not sev_passes_threshold(f.severity):
             continue
-        filtered.append(fnd)
+        selected.append(f)
 
-    # Inline vs summary
-    inline_items = [f for f in filtered if f.path and f.line]
-    summary_items = [f for f in filtered if not (f.path and f.line)]
+    # Split into inline candidates (must have file + line) vs summary
+    inline_candidates: List[Finding] = []
+    summary_items: List[Finding] = []
+    for f in selected:
+        if f.path and f.line:
+            inline_candidates.append(f)
+        else:
+            summary_items.append(f)
 
-    # Inline review comments (respect cap)
+    # Map to diff positions (respect MAX_INLINE)
     comments = []
-    cap = CONFIG.get("max_inline_comments", 30)
-    for f in inline_items[:cap]:
-        pr_file = next((pf for pf in pr.get_files() if pf.filename == f.path), None)
+    inline_count = 0
+    pr_files = list(pr.get_files())  # cache for speed
+
+    for f in inline_candidates:
+        if inline_count >= MAX_INLINE:
+            summary_items.append(f)
+            continue
+
+        pr_file = next((pf for pf in pr_files if pf.filename == f.path), None)
         if not pr_file:
-            # Can't map; keep it in the summary instead of losing it
             summary_items.append(f)
             continue
 
         patch = getattr(pr_file, "patch", "") or ""
         if not patch:
-            # Large files or certain cases return no patch; fall back to summary
+            # Large files sometimes provide no patch → summary fallback
             summary_items.append(f)
             continue
 
         position = find_position_in_diff(patch, f.line)
         if position is None:
-            # Line exists only on the removed side or couldn't map → summary
+            # Typically: pointing to a removed-only line
             summary_items.append(f)
             continue
 
-        comments.append({"path": f.path, "position": position, "body": f.body})
-    if comments:
-        pr.create_review(
-            body="Automated PHP Code Review Feedback",
-            comments=comments,
-            event="COMMENT"  # publish immediately (prevents 422: pending review exists)
-        )
+        comments.append({
+            "path": f.path,
+            "position": position,
+            "body": f.body[:MAX_BODY_LEN]
+        })
+        inline_count += 1
 
-    # Summary for non-line findings
-    if summary_items:
-        by_file: Dict[str, List[Finding]] = {}
-        for f in summary_items:
-            key = f.path or "General"
-            by_file.setdefault(key, []).append(f)
-        lines = ["**Other code review suggesions:**\n"]
-        for path, items in by_file.items():
-            lines.append(f"- **{path}**")
-            for it in items:
-                sev = it.severity.upper()
-                lines.append(f"  - [{sev}] {it.body}")
-        pr.create_issue_comment("\n".join(lines))
+    # Sort comments by severity (critical → warning → info), keep stable order otherwise
+    def sev_key(cmt):
+        body = cmt.get("body", "")
+        m = re.search(r"\[(CRITICAL|WARNING|INFO)\]", body, re.I)
+        sev = m.group(1).lower() if m else infer_severity(body)
+        return -SEVERITY_ORDER.get(sev, 0)
+    comments.sort(key=sev_key)
 
+    me_login = g.get_user().login
+    # Always ensure no stale pending review
+    clear_my_pending_review(pr, me_login)
+
+    # Publish review (not draft) and add summary as issue comment
+    # Wrap in a retry if GitHub races a pending review between list/delete and create
+    try:
+        if comments:
+            pr.create_review(
+                body="Automated PHP Code Review Feedback",
+                comments=comments,
+                event="COMMENT"  # publish immediately
+            )
+        if summary_items:
+            pr.create_issue_comment(build_summary(summary_items))
+    except Exception as e:
+        if "pending review" in str(e).lower():
+            clear_my_pending_review(pr, me_login)
+            if comments:
+                pr.create_review(
+                    body="Automated PHP Code Review Feedback",
+                    comments=comments,
+                    event="COMMENT"
+                )
+            if summary_items:
+                pr.create_issue_comment(build_summary(summary_items))
+        else:
+            raise
+
+    # If nothing at all was posted, leave a friendly note
     if not comments and not summary_items:
         pr.create_issue_comment("No issues found. Nice implementation!")
 
